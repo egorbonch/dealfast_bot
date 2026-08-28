@@ -1,0 +1,93 @@
+﻿from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, HTTPException, Header
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from aiogram.types import Update
+import uvicorn
+
+from config import settings
+from bot_instance import bot, dp
+from db import init_db, close_db, get_invoice
+from sbp_service import generate_sbp_link, generate_qr_code_base64
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Жизненный цикл приложения: старт и остановка"""
+    # 1. Инициализация пула БД
+    await init_db()
+    
+    # 2. Установка Webhook для Telegram
+    webhook_url = f"{settings.BASE_URL}{settings.WEBHOOK_PATH}"
+    await bot.set_webhook(
+        url=webhook_url,
+        secret_token=settings.WEBHOOK_SECRET,
+        drop_pending_updates=True
+    )
+    print(f"🚀 Webhook установлен на: {webhook_url}")
+    
+    yield
+    
+    # 3. Очистка при завершении
+    await bot.delete_webhook()
+    await close_db()
+    print("🛑 Webhook удален, сервисы остановлены")
+
+app = FastAPI(title="DealFast WebApp & Bot", lifespan=lifespan)
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "database": "connected"}
+
+@app.post(settings.WEBHOOK_PATH)
+async def bot_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str = Header(None)
+):
+    """Эндпоинт обработки входящих обновлений от Telegram"""
+    if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Невалидный секретный токен")
+    
+    data = await request.json()
+    update = Update.model_validate(data, context={"bot": bot})
+    await dp.feed_update(bot, update)
+    return JSONResponse(content={"status": "ok"})
+
+@app.get("/deal/{deal_id}", response_class=HTMLResponse)
+async def render_deal_page(request: Request, deal_id: str):
+    """Вывод микро-лендинга сделки с загрузкой из Supabase"""
+    invoice = await get_invoice(deal_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Счёт не найден или был удалён")
+    
+    pay_amount = float(invoice["prepayment"]) if invoice["prepayment"] > 0 else float(invoice["amount"])
+    comment = f"Оплата по сделке №{invoice['id']}"
+    
+    pay_url = generate_sbp_link(
+        phone=settings.RECEIVER_PHONE,
+        amount=int(pay_amount),
+        bank=settings.RECEIVER_BANK,
+        comment=comment
+    )
+    qr_code_base64 = generate_qr_code_base64(pay_url)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="deal.html",
+        context={
+            "deal": {
+                "id": str(invoice["id"])[:8],
+                "subject": invoice["title"],
+                "amount": float(invoice["amount"]),
+                "prepayment_amount": float(invoice["prepayment"]),
+                "user_name": "Исполнитель",
+                "term": "По договоренности"
+            },
+            "pay_amount": pay_amount,
+            "pay_url": pay_url,
+            "qr_code_base64": qr_code_base64
+        }
+    )
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=False)
