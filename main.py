@@ -22,7 +22,7 @@ from sbp_service import get_bank_links, generate_qr_code_base64
 logger = logging.getLogger(__name__)
 
 
-# --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА (RATE LIMIT) ---
+# --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА ---
 class RateLimitMiddleware(BaseMiddleware):
     def __init__(self, limit: float = 0.5):
         self.limit = limit
@@ -47,36 +47,52 @@ class RateLimitMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-# Регистрация Middleware в диспетчер
 dp.message.middleware(RateLimitMiddleware(limit=0.5))
 dp.callback_query.middleware(RateLimitMiddleware(limit=0.5))
 
-# --- 3. ЖИЗНЕННЫЙ ЦИКЛ ПРИЛОЖЕНИЯ ---
+
+# --- 2. ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБКИ 429 ---
+@dp.error()
+async def global_error_handler(event: ErrorEvent):
+    if isinstance(event.exception, TelegramRetryAfter):
+        logger.warning(f"⚠️ Ошибка 429: ожидание {event.exception.retry_after} секунд")
+        await asyncio.sleep(event.exception.retry_after + 0.5)
+        return True
+
+
+# --- 3. НАДЕЖНЫЙ ЖИЗНЕННЫЙ ЦИКЛ ПРИЛОЖЕНИЯ ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Жизненный цикл приложения: старт и остановка"""
-    # 1. Первым делом подключаемся к базе данных
+    """Жизненный цикл приложения: гарантированный сброс и установка Webhook"""
+    # 1. Подключение к БД
     try:
         await init_db()
         print("✅ База данных подключена")
     except Exception as e:
         print(f"❌ Ошибка подключения к БД: {e}")
 
-    # 2. Устанавливаем Webhook
+    # 2. ПРИНУДИТЕЛЬНЫЙ СБРОС И ОБНОВЛЕНИЕ WEBHOOK
     webhook_url = f"{settings.BASE_URL}{settings.WEBHOOK_PATH}"
+    secret = settings.WEBHOOK_SECRET.strip() if getattr(settings, "WEBHOOK_SECRET", None) else None
+
     try:
+        # Сначала обязательно удаляем старый webhook, чтобы сбросить секретный токен в Telegram
+        await bot.delete_webhook(drop_pending_updates=True)
+        await asyncio.sleep(0.5)
+        
+        # Регистрируем Webhook заново с актуальным секретным токеном
         await bot.set_webhook(
             url=webhook_url,
-            secret_token=settings.WEBHOOK_SECRET,
+            secret_token=secret,
             drop_pending_updates=True
         )
-        print(f"🚀 Webhook успешно установлен на: {webhook_url}")
+        print(f"🚀 Webhook гарантированно обновлен: {webhook_url}")
     except Exception as e:
         print(f"❌ Ошибка при установке Webhook: {e}")
 
     yield
 
-    # 3. Очистка при остановке сервера
+    # 3. Очистка при остановке
     try:
         await bot.delete_webhook()
     except Exception as e:
@@ -100,16 +116,20 @@ async def health_check():
     return {"status": "ok", "database": "connected"}
 
 
-# Обработчик webhook:
+# --- 4. БЕЗОПАСНЫЙ ОБРАБОТЧИК WEBHOOK ---
 @app.post(settings.WEBHOOK_PATH)
 async def bot_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(None)
 ):
-    # БЕЗОПАСНОСТЬ: Запрос обрабатывается ТОЛЬКО если секретный токен совпадает
-    if settings.WEBHOOK_SECRET:
-        if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
-            logger.warning("⛔ Заблокирована попытка несанкционированного доступа к Webhook")
+    expected_secret = settings.WEBHOOK_SECRET.strip() if getattr(settings, "WEBHOOK_SECRET", None) else None
+
+    # Проверка секретного токена с подробным логированием при расхождении
+    if expected_secret:
+        if x_telegram_bot_api_secret_token != expected_secret:
+            logger.warning(
+                f"⛔ Отклонен запрос Webhook! Получен токен: '{x_telegram_bot_api_secret_token}', ожидался: '{expected_secret}'"
+            )
             return Response(status_code=401)
 
     try:
@@ -132,22 +152,18 @@ async def render_deal_page(request: Request, deal_id: str):
     prepayment = float(invoice.get("prepayment") or 0)
     total_amount = float(invoice.get("amount") or 0)
 
-    # Расчет суммы к оплате (предоплата или полная сумма)
     pay_amount = prepayment if prepayment > 0 else total_amount
     comment = f"Оплата по сделке №{str(invoice['id'])[:8]}"
 
-    # 1. Формируем ссылки для всех банков (для модального окна)
     bank_links = get_bank_links(
         phone=settings.RECEIVER_PHONE,
         amount=pay_amount,
         comment=comment
     )
 
-    # 2. В QR-код зашиваем URL текущей страницы сделки
     deal_page_url = str(request.url)
     qr_code_base64 = generate_qr_code_base64(deal_page_url)
 
-    # 3. Передаем обновленный контекст в HTML-шаблон
     return templates.TemplateResponse(
         request=request,
         name="deal.html",
