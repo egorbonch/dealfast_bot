@@ -10,7 +10,7 @@ import uvicorn
 
 from config import settings
 from bot_instance import bot, dp
-from db import init_db, close_db, get_invoice
+import db
 from sbp_service import generate_sbp_link, generate_qr_code_base64
 
 logger = logging.getLogger(__name__)
@@ -69,23 +69,23 @@ async def bot_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(None)
 ):
-    # Проверка секретного токена
-    if settings.WEBHOOK_SECRET and x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
-        logger.warning("❌ Неверный WEBHOOK_SECRET в заголовке")
-        return Response(status_code=401)
-    
+    logger.info("📩 Получен входящий запрос от Telegram")
+
+    # Проверяем секретный токен ТОЛЬКО если он задан в настройках и пришел от Telegram
+    if settings.WEBHOOK_SECRET and x_telegram_bot_api_secret_token:
+        if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
+            logger.warning("❌ Несовпадение WEBHOOK_SECRET: запрос отклонен (401)")
+            return Response(status_code=401)
+
     try:
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
         
-        # Запускаем обработку и выводим ошибки в лог Render, если они возникнут
-        task = asyncio.create_task(dp.feed_update(bot, update))
-        task.add_done_callback(
-            lambda t: t.exception() and logger.error(f"❌ Ошибка в обработчике: {t.exception()}")
-        )
+        # Передаем обновление в диспетчер напрямую для перехвата всех ошибок
+        await dp.feed_update(bot, update)
     except Exception as e:
-        logger.error(f"❌ Ошибка разбора обновления: {e}")
-        
+        logger.error(f"❌ Ошибка при обработке сообщения: {e}", exc_info=True)
+
     return JSONResponse(content={"status": "ok"})
 
 
