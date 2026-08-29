@@ -1,11 +1,17 @@
 ﻿# -*- coding: utf-8 -*-
 import asyncio
 import logging
+import time
+from typing import Any, Callable, Dict, Awaitable
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
-from aiogram.types import Update
+
+from aiogram import BaseMiddleware
+from aiogram.types import Update, TelegramObject, CallbackQuery, ErrorEvent
+from aiogram.exceptions import TelegramRetryAfter
 import uvicorn
 
 from config import settings
@@ -16,6 +22,36 @@ from sbp_service import get_bank_links, generate_qr_code_base64
 logger = logging.getLogger(__name__)
 
 
+# --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА (RATE LIMIT) ---
+class RateLimitMiddleware(BaseMiddleware):
+    def __init__(self, limit: float = 0.5):
+        self.limit = limit
+        self.user_timestamps: Dict[int, float] = {}
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        user = data.get("event_from_user")
+        if user:
+            now = time.time()
+            last_time = self.user_timestamps.get(user.id, 0)
+            if now - last_time < self.limit:
+                if isinstance(event, CallbackQuery):
+                    await event.answer("Слишком часто! Подождите секунду.", show_alert=False)
+                return
+            self.user_timestamps[user.id] = now
+            
+        return await handler(event, data)
+
+
+# Регистрация Middleware в диспетчер
+dp.message.middleware(RateLimitMiddleware(limit=0.5))
+dp.callback_query.middleware(RateLimitMiddleware(limit=0.5))
+
+# --- 3. ЖИЗНЕННЫЙ ЦИКЛ ПРИЛОЖЕНИЯ ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Жизненный цикл приложения: старт и остановка"""
