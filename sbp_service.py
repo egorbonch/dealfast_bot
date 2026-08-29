@@ -1,33 +1,45 @@
-﻿import io
+﻿# -*- coding: utf-8 -*-
+import io
 import base64
 import urllib.parse
+import re
 import qrcode
 
-def generate_sbp_link(phone: str, amount: int, bank: str = "tbank", comment: str = "") -> str:
-    """
-    Формирует Deep-Link или веб-ссылку для моментального перехода в мобильный банк.
-    Поддерживает: Т-Банк, Сбербанк, Альфа-Банк и универсальный формат СБП (НСПК).
-    """
-    clean_phone = ''.join(filter(str.isdigit, phone))
-    encoded_comment = urllib.parse.quote(comment)
 
+def clean_phone_number(phone: str) -> str:
+    """Очищает номер телефона до 10 цифр без +7 или 8 в начале."""
+    digits = re.sub(r'\D', '', str(phone))
+    if len(digits) == 11 and digits[0] in ('7', '8'):
+        digits = digits[1:]
+    return digits
+
+
+def generate_sbp_link(phone: str, amount: float | int, bank: str = "tbank", comment: str = "") -> str:
+    """
+    Формирует корректную HTTPS-ссылку для перевода.
+    Использует универсальные HTTPS веб-ссылки вместо диплинков (sberbank://), 
+    чтобы избежать ошибок 404 и блокировок внутри встроенного браузера Telegram.
+    """
+    phone_10 = clean_phone_number(phone)
+    formatted_amount = int(amount)
+    encoded_comment = urllib.parse.quote(comment)
     bank_lower = bank.lower().strip()
 
-    if bank_lower in ["tbank", "tinkoff", "т-банк", "тинькофф"]:
-        # Ссылка формы перевода по номеру телефона в Т-Банке
-        return f"https://www.tinkoff.ru/rm/{clean_phone}/?amount={amount}&comment={encoded_comment}"
-    
+    # 1. Т-Банк (Форма перевода по номеру телефона)
+    if bank_lower in ["tbank", "tinkoff", "т-банк", "тинькофф", "тбанк"]:
+        return f"https://www.tinkoff.ru/rm/7{phone_10}/?amount={formatted_amount}&comment={encoded_comment}"
+
+    # 2. Сбербанк (Веб-универсальная ссылка СберБанк Онлайн)
     elif bank_lower in ["sber", "sberbank", "сбер", "сбербанк"]:
-        # Deep-link для мобильного приложения СберБанк Онлайн
-        return f"sberbank://payments/transfer/by-phone?phone={clean_phone}&amount={amount}"
-    
-    elif bank_lower in ["alfa", "alfabank", "альфа"]:
-        # Deep-link / веб-ссылка Альфа-Банка
-        return f"https://alfabank.ru/make-payment/?phone={clean_phone}&amount={amount}"
-    
-    else:
-        # Стандартная динамическая СБП-ссылка НСПК
-        return f"https://qr.nspk.ru/BS100000000000000000000000000000?type=01&bank=100000000004&sum={amount*100}&cur=RUB"
+        return f"https://www.sberbank.ru/ph/app/dl/pay?phone=7{phone_10}&amount={formatted_amount}"
+
+    # 3. Альфа-Банк
+    elif bank_lower in ["alfa", "alfabank", "альфа", "альфа-банк"]:
+        return f"https://alfabank.ru/make-payment/?phone=7{phone_10}&amount={formatted_amount}"
+
+    # По умолчанию — Т-Банк
+    return f"https://www.tinkoff.ru/rm/7{phone_10}/?amount={formatted_amount}&comment={encoded_comment}"
+
 
 def generate_qr_code_base64(data: str) -> str:
     """
@@ -43,11 +55,10 @@ def generate_qr_code_base64(data: str) -> str:
     qr.add_data(data)
     qr.make(fit=True)
 
-    # Генерация изображения в оперативной памяти
     img = qr.make_image(fill_color="#10b981", back_color="white")
-    
+
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     qr_bytes = buffer.getvalue()
-    
+
     return base64.b64encode(qr_bytes).decode('utf-8')
