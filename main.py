@@ -69,18 +69,23 @@ async def bot_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(None)
 ):
-    if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
+    # Проверка секретного токена
+    if settings.WEBHOOK_SECRET and x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
+        logger.warning("❌ Неверный WEBHOOK_SECRET в заголовке")
         return Response(status_code=401)
-
+    
     try:
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
-
-        # Асинхронно запускаем обработку сообщения и сразу отдаем 200 OK в Telegram
-        asyncio.create_task(dp.feed_update(bot, update))
+        
+        # Запускаем обработку и выводим ошибки в лог Render, если они возникнут
+        task = asyncio.create_task(dp.feed_update(bot, update))
+        task.add_done_callback(
+            lambda t: t.exception() and logger.error(f"❌ Ошибка в обработчике: {t.exception()}")
+        )
     except Exception as e:
-        logger.error(f"Ошибка разбора структуры сообщения: {e}")
-
+        logger.error(f"❌ Ошибка разбора обновления: {e}")
+        
     return JSONResponse(content={"status": "ok"})
 
 
