@@ -17,25 +17,31 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Жизненный цикл приложения: старт и остановка"""
-    # 1. Инициализация пула БД
-    await init_db()
-    
-    # 2. Принудительный сброс зависших сообщений и установка Webhook
+    # 1. Устанавливаем Webhook СРАЗУ при старте
     webhook_url = f"{settings.BASE_URL}{settings.WEBHOOK_PATH}"
-    await bot.delete_webhook(drop_pending_updates=True)
-    await bot.set_webhook(
-        url=webhook_url,
-        secret_token=settings.WEBHOOK_SECRET,
-        drop_pending_updates=True
-    )
-    print(f"🚀 Webhook установлен на: {webhook_url}")
+    try:
+        await bot.set_webhook(
+            url=webhook_url,
+            secret_token=settings.WEBHOOK_SECRET,
+            drop_pending_updates=True
+        )
+        print(f"🚀 Webhook успешно установлен на: {webhook_url}")
+    except Exception as e:
+        print(f"❌ Ошибка при установке Webhook: {e}")
+    
+    # 2. Инициализируем базу данных
+    try:
+        await init_db()
+        print("✅ База данных подключена")
+    except Exception as e:
+        print(f"❌ Ошибка подключения к БД: {e}")
     
     yield
     
     # 3. Очистка при завершении
     await bot.delete_webhook()
     await close_db()
-    print("🛑 Webhook удален, сервисы остановлены")
+    print("🛑 Сервисы остановлены")
 
 app = FastAPI(title="DealFast WebApp & Bot", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
