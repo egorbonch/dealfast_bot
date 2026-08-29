@@ -23,17 +23,26 @@ from sbp_service import get_bank_links, generate_qr_code_base64
 logger = logging.getLogger(__name__)
 
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-def get_clean_webhook_url() -> str:
-    """Формирует строго валидный HTTPS URL для Telegram Webhook"""
-    base = settings.BASE_URL.strip().rstrip('/')
-    if not base.startswith("https://"):
-        base = base.replace("http://", "https://")
-        if not base.startswith("https://"):
-            base = f"https://{base}"
+def get_clean_base_url(request_host: str = None) -> str:
+    """Определяет базовый URL из настроек, переменных Render или хоста запроса"""
+    base = getattr(settings, "BASE_URL", "") or os.getenv("RENDER_EXTERNAL_URL", "")
     
-    path = settings.WEBHOOK_PATH.strip().lstrip('/')
-    return f"{base}/{path}"
+    if not base and request_host:
+        base = f"https://{request_host}"
+
+    base = base.strip().rstrip('/')
+    if base and not base.startswith("http"):
+        base = f"https://{base}"
+    elif base.startswith("http://"):
+        base = base.replace("http://", "https://")
+        
+    return base
+
+
+def get_webhook_url(request_host: str = None) -> str:
+    base = get_clean_base_url(request_host)
+    path = getattr(settings, "WEBHOOK_PATH", "/webhook").strip().lstrip('/')
+    return f"{base}/{path}" if base else ""
 
 
 # --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА (RATE LIMIT) ---
@@ -84,20 +93,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Ошибка подключения к БД: {e}")
 
-    webhook_url = get_clean_webhook_url()
+    webhook_url = get_webhook_url()
 
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        await asyncio.sleep(1)
-        
-        await bot.set_webhook(
-            url=webhook_url,
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"]
-        )
-        logger.info(f"🚀 Webhook успешно зарегистрирован: {webhook_url}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка при установке Webhook: {e}")
+    if webhook_url:
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            await asyncio.sleep(1)
+            
+            res = await bot.set_webhook(
+                url=webhook_url,
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"]
+            )
+            logger.info(f"🚀 Webhook зарегистрирован ({res}): {webhook_url}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при установке Webhook: {e}")
+    else:
+        logger.error("❌ BASE_URL не найден! Webhook не запущен.")
 
     yield
 
@@ -114,20 +126,16 @@ app = FastAPI(title="DealFast WebApp & Bot", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
 
-# --- 4. ЭНДПОИНТЫ ДИАГНОСТИКИ ---
+# --- 4. ДИАГНОСТИЧЕСКИЕ ЭНДПОИНТЫ ---
 @app.get("/debug/webhook")
 async def debug_webhook():
-    """Проверка текущего статуса вебхука прямо со серверов Telegram"""
     try:
         info = await bot.get_webhook_info()
         return {
             "status": "ok",
             "url": info.url,
-            "has_custom_certificate": info.has_custom_certificate,
             "pending_update_count": info.pending_update_count,
-            "last_error_date": info.last_error_date,
             "last_error_message": info.last_error_message,
-            "max_connections": info.max_connections,
             "allowed_updates": info.allowed_updates
         }
     except Exception as e:
@@ -135,9 +143,14 @@ async def debug_webhook():
 
 
 @app.get("/debug/set-webhook")
-async def force_set_webhook():
-    """Ручной принудительный сброс и установка вебхука"""
-    webhook_url = get_clean_webhook_url()
+async def force_set_webhook(request: Request):
+    """Принудительно устанавливает вебхук, используя хост из запроса"""
+    host = request.headers.get("host")
+    webhook_url = get_webhook_url(request_host=host)
+    
+    if not webhook_url:
+        return {"status": "error", "message": "Не удалось определить URL для вебхука"}
+        
     await bot.delete_webhook(drop_pending_updates=True)
     res = await bot.set_webhook(
         url=webhook_url,
@@ -158,10 +171,8 @@ async def health_check():
 
 
 # --- 5. ОБРАБОТЧИК WEBHOOK ---
-# Гарантируем, что путь маршрутизатора начинается со слэша
-route_path = f"/{settings.WEBHOOK_PATH.strip().lstrip('/')}"
-
-@app.post(route_path)
+@app.post("/webhook")
+@app.post(f"/{getattr(settings, 'WEBHOOK_PATH', 'webhook').strip().lstrip('/')}")
 async def bot_webhook(request: Request):
     try:
         data = await request.json()
@@ -215,6 +226,5 @@ async def render_deal_page(request: Request, deal_id: str):
 
 
 if __name__ == "__main__":
-    # Принудительно связываем с 0.0.0.0 и с портом, который выдал Render
     port = int(os.getenv("PORT", getattr(settings, "PORT", 10000)))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
