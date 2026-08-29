@@ -7,10 +7,10 @@ class Settings(BaseSettings):
     # URL публичного сервера (Render.com), например: https://dealfast-app.onrender.com
     BASE_URL: str = os.getenv("BASE_URL", "https://dealfast-bot.onrender.com")
     WEBHOOK_PATH: str = "/webhook"
-    WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "my_super_secret_token_123")
+    WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "my_secret_bot_5007")
     
     # Строка подключения к Supabase PostgreSQL
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/postgres")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     
     # Параметры СБП
     RECEIVER_PHONE: str = os.getenv("RECEIVER_PHONE", "79991234567")

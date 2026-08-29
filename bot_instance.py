@@ -67,7 +67,7 @@ async def handle_voice_message(message: types.Message):
         )
 
         # Формирование веб-ссылки
-        deal_url = f"http://{settings.HOST}:{settings.PORT}/deal/{deal_id}"
+        deal_url = f"{settings.BASE_URL}/deal/{deal_id}"
 
         # Создание Inline-кнопки
         builder = InlineKeyboardBuilder()
