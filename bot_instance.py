@@ -19,9 +19,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Используем ParseMode.HTML — он максимально надежен и не ломается от символов
 bot = Bot(
     token=settings.BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher()
 
@@ -29,20 +30,20 @@ dp = Dispatcher()
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     await message.answer(
-        "ℹ️ *Как пользоваться ботом DealFast:*\n\n"
+        "ℹ️ <b>Как пользоваться ботом DealFast:</b>\n\n"
         "1. Запишите и отправьте голосовое сообщение с условиями сделки.\n"
         "2. Бот автоматически распознает условия и сгенерирует счёт.\n"
-        "3. Отправьте полученную ссылку покупателю для оплаты через СБП.",
-        parse_mode="Markdown"
+        "3. Отправьте полученную ссылку покупателю для оплаты через СБП."
     )
 
 
 @dp.message(CommandStart())
 async def handle_start(message: types.Message):
+    first_name = message.from_user.first_name or "пользователь"
     welcome_text = (
-        f"👋 **Здравствуйте, {message.from_user.first_name}!**\n\n"
+        f"👋 <b>Здравствуйте, {first_name}!</b>\n\n"
         f"Запишите голосовое сообщение с условиями сделки.\n"
-        f"Пример: _«Делаю дизайн лендинга за 20000 рублей, предоплата 50%, срок 4 дня»_."
+        f"Пример: <i>«Делаю дизайн лендинга за 20000 рублей, предоплата 50%, срок 4 дня»</i>."
     )
     await message.answer(welcome_text)
 
@@ -51,7 +52,7 @@ async def handle_start(message: types.Message):
 @dp.message(F.text & ~F.text.startswith("/"))
 async def handle_text_message(message: Message):
     await message.answer(
-        "🎙️ **Пожалуйста, отправьте именно голосовое сообщение** с описанием условий сделки.\n\n"
+        "🎙️ <b>Пожалуйста, отправьте именно голосовое сообщение</b> с описанием условий сделки.\n\n"
         "Текстовые сообщения не поддерживаются."
     )
 
@@ -68,7 +69,6 @@ async def handle_voice_message(message: types.Message):
     user_id = message.from_user.id
     msg_id = message.message_id
     
-    # Уникальные имена файлов для предотвращения конфликтов перезаписи
     ogg_path = f"temp_voice_{user_id}_{msg_id}.ogg"
     wav_path = f"temp_voice_{user_id}_{msg_id}.wav"
 
@@ -93,21 +93,19 @@ async def handle_voice_message(message: types.Message):
         prepayment = deal_data.get("prepayment_percent")
         term = deal_data.get("term")
 
-        # ПРОВЕРКА: Если не удалось разобрать хотя бы один параметр
         if not subject or not amount or prepayment is None or not term or term == "Не указан":
             await status_msg.edit_text(
-                "⚠️ **Не удалось чётко распознать все условия сделки.**\n\n"
-                "Пожалуйста, запишите новое голосовое сообщение и **чётче проговорите пункты**:\n"
+                "⚠️ <b>Не удалось чётко распознать все условия сделки.</b>\n\n"
+                "Пожалуйста, запишите новое голосовое сообщение и <b>чётче проговорите пункты</b>:\n"
                 "• Что именно нужно сделать (предмет работы)\n"
-                "• Итоговую сумму (например: *15 000 рублей*)\n"
-                "• Размер предоплаты (например: *10%* или *без предоплаты*)\n"
-                "• Срок выполнения (например: *3 дня*)"
+                "• Итоговую сумму (например: <i>15 000 рублей</i>)\n"
+                "• Размер предоплаты (например: <i>10%</i> или <i>без предоплаты</i>)\n"
+                "• Срок выполнения (например: <i>3 дня</i>)"
             )
             return
 
         user_name = message.from_user.full_name or message.from_user.first_name
 
-        # Сохранение сделки в БД
         deal_id = await create_deal(
             user_name=user_name,
             subject=subject,
@@ -117,19 +115,17 @@ async def handle_voice_message(message: types.Message):
             term=term
         )
 
-        # Формирование веб-ссылки
         deal_url = f"{settings.BASE_URL}/deal/{deal_id}"
 
-        # Создание Inline-кнопки
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 Открыть Счёт-Соглашение", url=deal_url)
 
         response = (
-            f"✅ **Счёт-Соглашение №{deal_id} сформирован!**\n\n"
-            f"• **Предмет:** `{subject}`\n"
-            f"• **Сумма:** `{amount} руб.`\n"
-            f"• **Предоплата:** `{prepayment}%` ({deal_data['prepayment_amount']} руб.)\n"
-            f"• **Срок:** `{term}`\n\n"
+            f"✅ <b>Счёт-Соглашение №{deal_id} сформирован!</b>\n\n"
+            f"• <b>Предмет:</b> <code>{subject}</code>\n"
+            f"• <b>Сумма:</b> <code>{amount} руб.</code>\n"
+            f"• <b>Предоплата:</b> <code>{prepayment}%</code> ({deal_data['prepayment_amount']} руб.)\n"
+            f"• <b>Срок:</b> <code>{term}</code>\n\n"
             f"🔗 Отправьте ссылку или нажмите кнопку ниже для перехода к оплате:"
         )
 
@@ -142,4 +138,7 @@ async def handle_voice_message(message: types.Message):
     finally:
         for path in [ogg_path, wav_path]:
             if os.path.exists(path):
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
