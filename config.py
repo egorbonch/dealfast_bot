@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
     
     # URL публичного сервера (Render.com), например: https://dealfast-app.onrender.com
-    BASE_URL: str = os.getenv("BASE_URL", "http://127.0.0.1:8000")
+    BASE_URL: str = os.getenv("BASE_URL", "https://dealfast-bot.onrender.com")
     WEBHOOK_PATH: str = "/webhook"
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "my_super_secret_token_123")
     
