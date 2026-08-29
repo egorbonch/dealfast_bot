@@ -7,44 +7,39 @@ import qrcode
 
 
 def clean_phone_number(phone: str) -> str:
-    """Очищает номер телефона до 10 цифр без +7 или 8 в начале."""
+    """Очищает номер телефона до 10 цифр (без 7 или 8 в начале)."""
     digits = re.sub(r'\D', '', str(phone))
     if len(digits) == 11 and digits[0] in ('7', '8'):
         digits = digits[1:]
     return digits
 
 
-def generate_sbp_link(phone: str, amount: float | int, bank: str = "tbank", comment: str = "") -> str:
+def get_bank_links(phone: str, amount: float | int, comment: str = "") -> dict:
     """
-    Формирует корректную HTTPS-ссылку для перевода.
-    Использует универсальные HTTPS веб-ссылки вместо диплинков (sberbank://), 
-    чтобы избежать ошибок 404 и блокировок внутри встроенного браузера Telegram.
+    Формирует словарь проверенных прямых ссылок и Deep-Link'ов для каждого банка.
     """
     phone_10 = clean_phone_number(phone)
     formatted_amount = int(amount)
     encoded_comment = urllib.parse.quote(comment)
-    bank_lower = bank.lower().strip()
 
-    # 1. Т-Банк (Форма перевода по номеру телефона)
-    if bank_lower in ["tbank", "tinkoff", "т-банк", "тинькофф", "тбанк"]:
-        return f"https://www.tinkoff.ru/rm/7{phone_10}/?amount={formatted_amount}&comment={encoded_comment}"
-
-    # 2. Сбербанк (Веб-универсальная ссылка СберБанк Онлайн)
-    elif bank_lower in ["sber", "sberbank", "сбер", "сбербанк"]:
-        return f"https://www.sberbank.ru/ph/app/dl/pay?phone=7{phone_10}&amount={formatted_amount}"
-
-    # 3. Альфа-Банк
-    elif bank_lower in ["alfa", "alfabank", "альфа", "альфа-банк"]:
-        return f"https://alfabank.ru/make-payment/?phone=7{phone_10}&amount={formatted_amount}"
-
-    # По умолчанию — Т-Банк
-    return f"https://www.tinkoff.ru/rm/7{phone_10}/?amount={formatted_amount}&comment={encoded_comment}"
+    return {
+        # Т-Банк: Офиц. форма сбер/т-переводов
+        "tbank": f"https://www.tinkoff.ru/rm/7{phone_10}/?amount={formatted_amount}&comment={encoded_comment}",
+        
+        # Сбербанк: Deep-link для моментального открытия СберБанк Онлайн
+        "sber": f"sberbank://payments/transfer/by-phone?phone=7{phone_10}&amount={formatted_amount}",
+        
+        # Альфа-Банк
+        "alfa": f"https://alfabank.ru/make-payment/?phone=7{phone_10}&amount={formatted_amount}",
+        
+        # Чистый номер телефона для копирования (для перевода по СБП вручную)
+        "phone_raw": f"+7{phone_10}"
+    }
 
 
-def generate_qr_code_base64(data: str) -> str:
+def generate_qr_code_base64(data_url: str) -> str:
     """
-    Генерирует QR-код в формате PNG и кодирует его в Base64 для прямой вставки в HTML:
-    <img src="data:image/png;base64,..." />
+    Генерирует QR-код со ссылкой на страницу счёта.
     """
     qr = qrcode.QRCode(
         version=1,
@@ -52,13 +47,11 @@ def generate_qr_code_base64(data: str) -> str:
         box_size=8,
         border=2,
     )
-    qr.add_data(data)
+    qr.add_data(data_url)
     qr.make(fit=True)
 
     img = qr.make_image(fill_color="#10b981", back_color="white")
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
-    qr_bytes = buffer.getvalue()
-
-    return base64.b64encode(qr_bytes).decode('utf-8')
+    return base64.b64encode(buffer.getvalue()).decode('utf-8')

@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Счёт-Соглашение № {{ deal.id }}</title>
-    <!-- Telegram WebApp SDK для предотвращения блокировок внешних ссылок -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root {
@@ -146,12 +145,6 @@
                 box-shadow: 0 4px 10px rgba(0,0,0,0.05);
             }
 
-        .qr-hint {
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-top: 8px;
-        }
-
         .legal-box {
             background: #fffbeb;
             border: 1px solid #fef3c7;
@@ -170,7 +163,7 @@
             display: flex;
             align-items: flex-start;
             gap: 10px;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
             cursor: pointer;
         }
 
@@ -179,7 +172,6 @@
                 height: 18px;
                 margin-top: 2px;
                 accent-color: var(--sbp-green);
-                cursor: pointer;
             }
 
             .checkbox-container span {
@@ -187,52 +179,127 @@
                 line-height: 1.3;
             }
 
-        /* Стили кнопок оплаты по банкам */
-        .pay-actions {
+        /* Одна главная кнопка */
+        .btn-main-pay {
+            width: 100%;
+            background-color: var(--sbp-green);
+            color: #ffffff;
+            border: none;
+            padding: 16px;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+        }
+
+            .btn-main-pay:disabled {
+                background-color: #cbd5e1;
+                color: #94a3b8;
+                cursor: not-allowed;
+                box-shadow: none;
+            }
+
+        /* МОДАЛЬНОЕ ОКНО */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: flex-end;
+            z-index: 1000;
+        }
+
+        .modal-card {
+            background: #ffffff;
+            width: 100%;
+            max-width: 440px;
+            border-radius: 24px 24px 0 0;
+            padding: 24px;
+            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+            }
+
+            to {
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .modal-close {
+            background: #f1f5f9;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        .bank-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 12px;
         }
 
-        .btn-bank {
-            width: 100%;
-            padding: 14px;
-            border-radius: 12px;
-            font-weight: 700;
-            font-size: 15px;
-            text-align: center;
-            text-decoration: none;
-            cursor: pointer;
-            border: none;
-            transition: opacity 0.2s ease;
+        .bank-item {
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 8px;
+            gap: 12px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 15px;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+            transition: background 0.2s;
         }
 
-        .btn-tbank {
-            background-color: #ffdd2d;
-            color: #000000;
-        }
+            .bank-item.tbank {
+                background: #fffbe6;
+                border-color: #ffe58f;
+                color: #1f1f1f;
+            }
 
-        .btn-sber {
-            background-color: #21a038;
-            color: #ffffff;
-        }
+            .bank-item.sber {
+                background: #e6f7ff;
+                border-color: #91d5ff;
+                color: #0050b3;
+            }
 
-        .btn-bank.disabled {
-            background-color: #cbd5e1 !important;
-            color: #94a3b8 !important;
-            pointer-events: none;
-            cursor: not-allowed;
-        }
+            .bank-item.alfa {
+                background: #fff1f0;
+                border-color: #ffa39e;
+                color: #cf1322;
+            }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="card">
-            <!-- Исполнитель -->
+            <!-- Шапка -->
             <div class="executor-header">
                 <div class="avatar">
                     {{ deal.user_name[0] if deal.user_name else 'Ф' }}
@@ -266,10 +333,12 @@
                 <div class="param-value">⏱ {{ deal.term }}</div>
             </div>
 
-            <!-- Блок QR-кода -->
+            <!-- QR-код ведет на страницу счёта -->
             <div class="qr-section">
-                <img src="data:image/png;base64,{{ qr_code_base64 }}" alt="QR Code">
-                <div class="qr-hint">Отсканируйте приложением любого банка</div>
+                <img src="data:image/png;base64,{{ qr_code_base64 }}" alt="QR-код оплаты">
+                <div class="qr-hint" style="font-size: 12px; color: #64748b; margin-top: 8px;">
+                    Отсканируйте камерой телефона для оплаты
+                </div>
             </div>
 
             <!-- Оферта -->
@@ -277,64 +346,73 @@
                 <p><strong>Безопасная сделка:</strong> Оплата подтверждает согласие с условиями счёта и является акцептом публичной оферты (ст. 438 ГК РФ).</p>
             </div>
 
-            <!-- Подтверждение оферты -->
             <label class="checkbox-container">
-                <input type="checkbox" id="offerAgreement" onchange="togglePayButtons()">
+                <input type="checkbox" id="offerAgreement" onchange="togglePayButton()">
                 <span>Я принимаю условия публичной оферты</span>
             </label>
 
-            <!-- ВСТАВЛЕННЫЙ БЛОК: Кнопки выбора банков -->
-            <div class="pay-actions">
-                <!-- Кнопка Т-Банк -->
-                <button type="button"
-                        onclick="openPayLink('{{ pay_url }}')"
-                        id="btnTBank"
-                        class="btn-bank btn-tbank disabled">
-                    💛 Оплатить через Т-Банк (Т-Pay)
-                </button>
+            <!-- ОДНА КНОПКА -->
+            <button type="button" id="payButton" class="btn-main-pay" onclick="openBankModal()" disabled>
+                Оплатить {{ pay_amount }} ₽
+            </button>
+        </div>
+    </div>
 
-                <!-- Кнопка Сбербанк -->
-                <button type="button"
-                        onclick="openPayLink('https://www.sberbank.ru/ph/app/dl/pay?phone=79990000000&amount={{ pay_amount }}')"
-                        id="btnSber"
-                        class="btn-bank btn-sber disabled">
-                    💚 Оплатить через Сбербанк (СберPay)
-                </button>
+    <!-- ВСПЛЫВАЮЩЕЕ ОКНО ВЫБОРА БАНКА -->
+    <div id="bankModal" class="modal-overlay" onclick="closeBankModal(event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">Выберите банк для оплаты</div>
+                <button class="modal-close" onclick="closeBankModal()">✕</button>
+            </div>
+            <div class="bank-list">
+                <!-- Т-Банк -->
+                <div class="bank-item tbank" onclick="payWithBank('{{ bank_links.tbank }}')">
+                    💛 Т-Банк (Т-Pay / СБП)
+                </div>
+
+                <!-- Сбербанк -->
+                <div class="bank-item sber" onclick="payWithBank('{{ bank_links.sber }}')">
+                    💚 Сбербанк (СберБанк Онлайн)
+                </div>
+
+                <!-- Альфа-Банк -->
+                <div class="bank-item alfa" onclick="payWithBank('{{ bank_links.alfa }}')">
+                    ❤️ Альфа-Банк
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Инициализация Telegram WebApp API
         if (window.Telegram && window.Telegram.WebApp) {
             window.Telegram.WebApp.ready();
             window.Telegram.WebApp.expand();
         }
 
-        // Активация/деактивация кнопок при клике на галочку
-        function togglePayButtons() {
-            const isChecked = document.getElementById('offerAgreement').checked;
-            const btnTBank = document.getElementById('btnTBank');
-            const btnSber = document.getElementById('btnSber');
-
-            if (isChecked) {
-                btnTBank.classList.remove('disabled');
-                btnSber.classList.remove('disabled');
-            } else {
-                btnTBank.classList.add('disabled');
-                btnSber.classList.add('disabled');
-            }
+        function togglePayButton() {
+            const checkbox = document.getElementById('offerAgreement');
+            const button = document.getElementById('payButton');
+            button.disabled = !checkbox.checked;
         }
 
-        // Безопасный переход по ссылке в банк (без 404 и блокировок Telegram)
-        function openPayLink(url) {
-            const isChecked = document.getElementById('offerAgreement').checked;
-            if (!isChecked) return;
+        function openBankModal() {
+            document.getElementById('bankModal').style.display = 'flex';
+        }
 
+        function closeBankModal(event) {
+            document.getElementById('bankModal').style.display = 'none';
+        }
+
+        function payWithBank(url) {
+            closeBankModal();
+
+            // Если переход внутри Telegram
             if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
                 window.Telegram.WebApp.openLink(url);
             } else {
-                window.open(url, '_blank', 'noopener,noreferrer') || (window.location.href = url);
+                // Прямой вызов Deep-Link для мобильного приложения банка
+                window.location.href = url;
             }
         }
     </script>

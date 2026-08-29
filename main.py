@@ -89,7 +89,6 @@ async def bot_webhook(
 @app.get("/deal/{deal_id}", response_class=HTMLResponse)
 async def render_deal_page(request: Request, deal_id: str):
     """Вывод микро-лендинга сделки с загрузкой из Supabase"""
-    # Вызов функции get_invoice из db.py
     invoice = await get_invoice(deal_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Счёт не найден или был удалён")
@@ -101,14 +100,18 @@ async def render_deal_page(request: Request, deal_id: str):
     pay_amount = prepayment if prepayment > 0 else total_amount
     comment = f"Оплата по сделке №{str(invoice['id'])[:8]}"
 
-    pay_url = generate_sbp_link(
+    # 1. Формируем ссылки для всех банков (для модального окна)
+    bank_links = get_bank_links(
         phone=settings.RECEIVER_PHONE,
-        amount=int(pay_amount),
-        bank=settings.RECEIVER_BANK,
+        amount=pay_amount,
         comment=comment
     )
-    qr_code_base64 = generate_qr_code_base64(pay_url)
 
+    # 2. В QR-код зашиваем URL текущей страницы сделки
+    deal_page_url = str(request.url)
+    qr_code_base64 = generate_qr_code_base64(deal_page_url)
+
+    # 3. Передаем обновленный контекст в HTML-шаблон
     return templates.TemplateResponse(
         request=request,
         name="deal.html",
@@ -123,7 +126,7 @@ async def render_deal_page(request: Request, deal_id: str):
                 "term": invoice.get("term", "По договоренности")
             },
             "pay_amount": pay_amount,
-            "pay_url": pay_url,
+            "bank_links": bank_links,
             "qr_code_base64": qr_code_base64
         }
     )
