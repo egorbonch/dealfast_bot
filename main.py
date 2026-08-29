@@ -22,7 +22,7 @@ from sbp_service import get_bank_links, generate_qr_code_base64
 logger = logging.getLogger(__name__)
 
 
-# --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА ---
+# --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА (RATE LIMIT) ---
 class RateLimitMiddleware(BaseMiddleware):
     def __init__(self, limit: float = 0.5):
         self.limit = limit
@@ -51,7 +51,7 @@ dp.message.middleware(RateLimitMiddleware(limit=0.5))
 dp.callback_query.middleware(RateLimitMiddleware(limit=0.5))
 
 
-# --- 2. ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБКИ 429 ---
+# --- 2. ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБКИ 429 (TOO MANY REQUESTS) ---
 @dp.error()
 async def global_error_handler(event: ErrorEvent):
     if isinstance(event.exception, TelegramRetryAfter):
@@ -63,36 +63,44 @@ async def global_error_handler(event: ErrorEvent):
 # --- 3. НАДЕЖНЫЙ ЖИЗНЕННЫЙ ЦИКЛ ПРИЛОЖЕНИЯ ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Жизненный цикл приложения: гарантированный сброс и установка Webhook"""
-    # 1. Подключение к БД
+    """Гарантированный сброс и установка Webhook при запуске"""
     try:
         await init_db()
         print("✅ База данных подключена")
     except Exception as e:
         print(f"❌ Ошибка подключения к БД: {e}")
 
-    # 2. ПРИНУДИТЕЛЬНЫЙ СБРОС И ОБНОВЛЕНИЕ WEBHOOK
-    webhook_url = f"{settings.BASE_URL}{settings.WEBHOOK_PATH}"
-    secret = settings.WEBHOOK_SECRET.strip() if getattr(settings, "WEBHOOK_SECRET", None) else None
+    # Очищаем секретный токен от пробелов
+    raw_secret = getattr(settings, "WEBHOOK_SECRET", None)
+    secret = raw_secret.strip() if raw_secret and raw_secret.strip() else None
+
+    webhook_url = f"{settings.BASE_URL.rstrip('/')}{settings.WEBHOOK_PATH}"
 
     try:
-        # Сначала обязательно удаляем старый webhook, чтобы сбросить секретный токен в Telegram
+        # Шаг 1: Принудительное удаление старого вебхука с очисткой зависших запросов
         await bot.delete_webhook(drop_pending_updates=True)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
         
-        # Регистрируем Webhook заново с актуальным секретным токеном
-        await bot.set_webhook(
-            url=webhook_url,
-            secret_token=secret,
-            drop_pending_updates=True
-        )
-        print(f"🚀 Webhook гарантированно обновлен: {webhook_url}")
+        # Шаг 2: Установка нового Webhook
+        if secret:
+            await bot.set_webhook(
+                url=webhook_url,
+                secret_token=secret,
+                drop_pending_updates=True
+            )
+            print(f"🚀 Webhook запущен С СЕКРЕТНЫМ ТОКЕНОМ: {webhook_url}")
+        else:
+            await bot.set_webhook(
+                url=webhook_url,
+                drop_pending_updates=True
+            )
+            print(f"🚀 Webhook запущен БЕЗ СЕКРЕТНОГО ТОКЕНА (режим свободной отладки): {webhook_url}")
+
     except Exception as e:
         print(f"❌ Ошибка при установке Webhook: {e}")
 
     yield
 
-    # 3. Очистка при остановке
     try:
         await bot.delete_webhook()
     except Exception as e:
@@ -122,22 +130,24 @@ async def bot_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(None)
 ):
-    expected_secret = settings.WEBHOOK_SECRET.strip() if getattr(settings, "WEBHOOK_SECRET", None) else None
+    raw_secret = getattr(settings, "WEBHOOK_SECRET", None)
+    secret_in_settings = raw_secret.strip() if raw_secret and raw_secret.strip() else None
 
-    # Проверка секретного токена с подробным логированием при расхождении
-    if expected_secret:
-        if x_telegram_bot_api_secret_token != expected_secret:
+    # Проверка секретного токена ВПЛОТЬ до совпадения (только если токен реально задан)
+    if secret_in_settings:
+        if x_telegram_bot_api_secret_token != secret_in_settings:
             logger.warning(
-                f"⛔ Отклонен запрос Webhook! Получен токен: '{x_telegram_bot_api_secret_token}', ожидался: '{expected_secret}'"
+                f"⚠️ Отклонен запрос Webhook! Получен: '{x_telegram_bot_api_secret_token}', ожидался: '{secret_in_settings}'"
             )
             return Response(status_code=401)
 
     try:
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
-        asyncio.create_task(dp.feed_update(bot, update))
+        # Ожидаем выполнение напрямую, чтобы ошибки не пропадали в фоновых задачах
+        await dp.feed_update(bot, update)
     except Exception as e:
-        logger.error(f"❌ Ошибка разбора обновления: {e}")
+        logger.error(f"❌ Ошибка разбора/обработки обновления бота: {e}", exc_info=True)
 
     return JSONResponse(content={"status": "ok"})
 
