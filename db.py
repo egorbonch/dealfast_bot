@@ -1,28 +1,39 @@
-﻿import asyncpg
+﻿# -*- coding: utf-8 -*-
+import asyncpg
 from typing import Optional, Dict, Any
 from config import settings
 
 pool: Optional[asyncpg.Pool] = None
 
+
 async def init_db():
     """Инициализация пула подключений к PostgreSQL Supabase"""
     global pool
-    pool = await asyncpg.create_pool(
-        dsn=settings.DATABASE_URL,
-        min_size=1,
-        max_size=10,
-        timeout=30.0
-    )
-    print("✅ Пул подключений к PostgreSQL (Supabase) успешно создан")
+    if pool is None:
+        pool = await asyncpg.create_pool(
+            dsn=settings.DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            timeout=30.0
+        )
+        print("✅ Пул подключений к PostgreSQL (Supabase) успешно создан")
+
 
 async def close_db():
     """Закрытие пула подключений при остановке приложения"""
     global pool
     if pool:
         await pool.close()
+        pool = None
         print("🛑 Пул подключений к PostgreSQL закрыт")
 
-async def create_invoice(creator_id: int, title: str, amount: float, prepayment: float = 0.0) -> Dict[str, Any]:
+
+async def create_invoice(
+    creator_id: int, 
+    title: str, 
+    amount: float, 
+    prepayment: float = 0.0
+) -> Dict[str, Any]:
     """Создание нового счёта в БД"""
     query = """
         INSERT INTO invoices (creator_id, title, amount, prepayment, status)
@@ -33,28 +44,27 @@ async def create_invoice(creator_id: int, title: str, amount: float, prepayment:
         row = await connection.fetchrow(query, creator_id, title, amount, prepayment)
         return dict(row)
 
-async def get_invoice(deal_id: str):
-    """Получение счета по UUID"""
+
+async def get_invoice(deal_id: str) -> Optional[Dict[str, Any]]:
+    """Получение счёта по полному или сокращённому UUID (первые 8 символов)"""
     query = """
-        SELECT id, creator_id, title, amount, prepayment, status, created_at
+        SELECT *
         FROM invoices
-        WHERE id = $1::uuid;
+        WHERE id::text LIKE $1
+        LIMIT 1;
     """
     async with pool.acquire() as con:
-        # Ищем запись, ID которой начинается с переданной строки deal_id
-        row = await con.fetchrow(
-            "SELECT * FROM invoices WHERE id::text LIKE $1 LIMIT 1",
-            f"{deal_id}%"
-        )
+        row = await con.fetchrow(query, f"{deal_id}%")
         return dict(row) if row else None
 
+
 async def update_invoice_status(invoice_id: str, new_status: str) -> bool:
-    """Обновление статуса счёта ('created' -> 'accepted' -> 'paid')"""
+    """Обновление статуса счёта по полному или сокращённому UUID"""
     query = """
         UPDATE invoices
         SET status = $1
-        WHERE id = $2::uuid;
+        WHERE id::text LIKE $2;
     """
     async with pool.acquire() as connection:
-        result = await connection.execute(query, new_status, invoice_id)
-        return result == "UPDATE 1"
+        result = await connection.execute(query, new_status, f"{invoice_id}%")
+        return "UPDATE" in result
