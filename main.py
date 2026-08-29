@@ -10,7 +10,7 @@ import uvicorn
 
 from config import settings
 from bot_instance import bot, dp
-import db
+from db import init_db, close_db, get_invoice
 from sbp_service import generate_sbp_link, generate_qr_code_base64
 
 logger = logging.getLogger(__name__)
