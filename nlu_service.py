@@ -35,30 +35,32 @@ def transcribe_audio(wav_path: str) -> str:
 
 def clean_subject(raw_subject: str) -> str:
     """
-    Очищает предмет сделки от глаголов, предлогов и мусорных слов.
-    Пример: 'Делаю дизайн лендинга' -> 'Дизайн лендинга'
-    Пример: 'по разработке сайта для компании' -> 'Сайт для компании'
+    Очищает предмет сделки от лишних глаголов в начале и хвостовых слов (сроки, суммы).
+    Пример: 'Делают дизайн сайта за срок' -> 'Дизайн сайта'
     """
     if not raw_subject:
-        return "Услуга"
+        return ""
     
     text = raw_subject.strip()
 
-    # Регулярное выражение для удаления начальных глаголов и предлогов
+    # 1. Удаление начальных служебных слов и глаголов
     noise_prefixes = (
-        r"^(делаю|сделать|нужно|надо|создать|разработать|написать|рисую|продам|купить|"
+        r"^(делаю|делают|сделать|нужно|надо|создать|разработать|написать|рисую|продам|купить|"
         r"оформление|написание|создание|разработка|услуги|услуга|по|для|на|про|за|из|под)\s+"
     )
-
-    # Повторяем удаление, если в начале несколько мусорных слов подряд
     while re.search(noise_prefixes, text, flags=re.IGNORECASE):
         text = re.sub(noise_prefixes, "", text, flags=re.IGNORECASE).strip()
 
-    # Очищаем края от символов и лишних пробелов
+    # 2. Удаление хвостов (фразы про срок, сумму или предоплату)
+    noise_suffixes = (
+        r"\s+(за\s+срок.*|на\s+сумму.*|за\s+\d+.*|с\s+предоплатой.*|предоплата.*|срок.*)$"
+    )
+    text = re.sub(noise_suffixes, "", text, flags=re.IGNORECASE).strip()
+
+    # 3. Финальная очистка знаков препинания
     text = text.strip(" .,:-–—\"'")
 
-    # Возвращаем с заглавной буквы
-    return text.capitalize() if text else "Услуга"
+    return text.capitalize() if text else ""
 
 def parse_deal_details(text: str) -> dict:
     """
@@ -123,17 +125,16 @@ def parse_deal_details(text: str) -> dict:
     cleaned = re.sub(r'(\bсрок\b|\bза\b|\bна\b)?\s*\d+\s*(дн[ей|я|ь]|день|недел[ь|и|я])', '', cleaned, flags=re.IGNORECASE)
     # Удаление оставшихся стоящих отдельно цифр
     cleaned = re.sub(r'\b\d+\b', '', cleaned)
-    # Очистка лишних пробелов и знаков препинания
-    subject = re.sub(r'\s+', ' ', cleaned).strip(" ,.-")
+    
+    # Применяем улучшенную очистку предмета сделки
+    subject = clean_subject(cleaned)
     
     if not subject or len(subject) < 3:
-        subject = "Выполнение работ по договоренности"
-    else:
-        subject = subject.capitalize()
+        subject = ""
 
     return {
         "full_text": text,
-        "subject": clean_subject(subject),
+        "subject": subject,
         "amount": amount,
         "prepayment_percent": prepayment_percent,
         "prepayment_amount": prepayment_amount,

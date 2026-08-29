@@ -43,10 +43,10 @@ async def get_invoice(deal_id: str):
     async with pool.acquire() as con:
         # Ищем запись, ID которой начинается с переданной строки deal_id
         row = await con.fetchrow(
-            "SELECT * FROM invoices WHERE id::text LIKE $1 || '%'", 
-            deal_id
+            "SELECT * FROM invoices WHERE id::text LIKE $1 LIMIT 1",
+            f"{deal_id}%"
         )
-        return row
+        return dict(row) if row else None
 
 async def update_invoice_status(invoice_id: str, new_status: str) -> bool:
     """Обновление статуса счёта ('created' -> 'accepted' -> 'paid')"""
