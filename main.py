@@ -1,6 +1,6 @@
 ﻿from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Header
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from aiogram.types import Update
 import uvicorn
@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     # 1. Инициализация пула БД
     await init_db()
     
-    # 2. Установка Webhook для Telegram
+    # 2. Установка Webhook для Telegram (drop_pending_updates очищает старую очередь)
     webhook_url = f"{settings.BASE_URL}{settings.WEBHOOK_PATH}"
     await bot.set_webhook(
         url=webhook_url,
@@ -50,11 +50,16 @@ async def bot_webhook(
 ):
     """Эндпоинт обработки входящих обновлений от Telegram"""
     if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Невалидный секретный токен")
+        return Response(status_code=401)
     
-    data = await request.json()
-    update = Update.model_validate(data, context={"bot": bot})
-    await dp.feed_update(bot, update)
+    # Безопасный блок: любой сбой логики бота не ломает прием следующих сообщений
+    try:
+        data = await request.json()
+        update = Update.model_validate(data, context={"bot": bot})
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        print(f"[ERROR] Ошибка при обработке сообщения Telegram: {e}")
+        
     return JSONResponse(content={"status": "ok"})
 
 @app.get("/deal/{deal_id}", response_class=HTMLResponse)
