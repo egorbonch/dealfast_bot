@@ -5,11 +5,11 @@ from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import Message
+from aiogram.types import Message, ErrorEvent
 from config import settings
 from nlu_service import convert_ogg_to_wav, transcribe_audio, parse_deal_details
 from deal_storage import create_deal
-from aiogram.types import ErrorEvent
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -26,7 +26,6 @@ dp = Dispatcher()
 async def global_error_handler(event: ErrorEvent):
     print(f"[CRITICAL ERROR] Неперехваченная ошибка: {event.exception}")
     
-    # Отправляем пользователю вежливое уведомление вместо молчания бота
     if event.update.message:
         await event.update.message.answer(
             "⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте ещё раз."
@@ -37,11 +36,12 @@ async def global_error_handler(event: ErrorEvent):
 async def cmd_help(message: Message):
     await message.answer(
         "ℹ️ *Как пользоваться ботом DealFast:*\n\n"
-        "1. Отправьте голосовое или текстовое сообщение с условиями сделки (например: *'Сайт за 15000 рублей, предоплата 10%'*).\n"
+        "1. Запишите и отправьте голосовое сообщение с условиями сделки.\n"
         "2. Бот автоматически распознает условия и сгенерирует счёт.\n"
         "3. Отправьте полученную ссылку покупателю для оплаты через СБП.",
         parse_mode="Markdown"
     )
+
 @dp.message(CommandStart())
 async def handle_start(message: types.Message):
     welcome_text = (
@@ -51,6 +51,15 @@ async def handle_start(message: types.Message):
     )
     await message.answer(welcome_text)
 
+# --- 1. ПЕРЕХВАТ ОБЫЧНЫХ ТЕКСТОВЫХ СООБЩЕНИЙ ---
+@dp.message(F.text & ~F.text.startswith("/"))
+async def handle_text_message(message: Message):
+    await message.answer(
+        "🎙️ **Пожалуйста, отправьте именно голосовое сообщение** с описанием условий сделки.\n\n"
+        "Текстовые сообщения не поддерживаются."
+    )
+
+# --- 2. ОБРАБОТКА ГОЛОСОВЫХ СООБЩЕНИЙ И ПРОВЕРКА УСЛОВИЙ ---
 @dp.message(F.voice)
 async def handle_voice_message(message: types.Message):
     status_msg = await message.answer("🔄 Обрабатываю голосовое сообщение...")
@@ -74,16 +83,34 @@ async def handle_voice_message(message: types.Message):
             return
 
         deal_data = parse_deal_details(recognized_text)
+
+        subject = deal_data.get("subject")
+        amount = deal_data.get("amount")
+        prepayment = deal_data.get("prepayment_percent")
+        term = deal_data.get("term")
+
+        # ПРОВЕРКА: Если не удалось разобрать хотя бы один параметр
+        if not subject or not amount or prepayment is None or not term or term == "Не указан":
+            await status_msg.edit_text(
+                "⚠️ **Не удалось чётко распознать все условия сделки.**\n\n"
+                "Пожалуйста, запишите новое голосовое сообщение и **чётче проговорите пункты**:\n"
+                "• Что именно нужно сделать (предмет работы)\n"
+                "• Итоговую сумму (например: *15 000 рублей*)\n"
+                "• Размер предоплаты (например: *10%* или *без предоплаты*)\n"
+                "• Срок выполнения (например: *3 дня*)"
+            )
+            return
+
         user_name = message.from_user.full_name or message.from_user.first_name
 
         # Сохранение сделки в БД/память
         deal_id = create_deal(
             user_name=user_name,
-            subject=deal_data["subject"],
-            amount=deal_data["amount"],
+            subject=subject,
+            amount=amount,
             prepayment_amount=deal_data["prepayment_amount"],
-            prepayment_percent=deal_data["prepayment_percent"],
-            term=deal_data["term"]
+            prepayment_percent=prepayment,
+            term=term
         )
 
         # Формирование веб-ссылки
@@ -95,10 +122,10 @@ async def handle_voice_message(message: types.Message):
 
         response = (
             f"✅ **Счёт-Соглашение №{deal_id} сформирован!**\n\n"
-            f"• **Предмет:** `{deal_data['subject']}`\n"
-            f"• **Сумма:** `{deal_data['amount']} руб.`\n"
-            f"• **Предоплата:** `{deal_data['prepayment_percent']}%` ({deal_data['prepayment_amount']} руб.)\n"
-            f"• **Срок:** `{deal_data['term']}`\n\n"
+            f"• **Предмет:** `{subject}`\n"
+            f"• **Сумма:** `{amount} руб.`\n"
+            f"• **Предоплата:** `{prepayment}%` ({deal_data['prepayment_amount']} руб.)\n"
+            f"• **Срок:** `{term}`\n\n"
             f"🔗 Отправьте ссылку или нажмите кнопку ниже для перехода к оплате:"
         )
 
