@@ -33,20 +33,20 @@ async def create_invoice(creator_id: int, title: str, amount: float, prepayment:
         row = await connection.fetchrow(query, creator_id, title, amount, prepayment)
         return dict(row)
 
-async def get_invoice(invoice_id: str) -> Optional[Dict[str, Any]]:
+async def get_invoice(deal_id: str):
     """Получение счета по UUID"""
     query = """
         SELECT id, creator_id, title, amount, prepayment, status, created_at
         FROM invoices
         WHERE id = $1::uuid;
     """
-    async with pool.acquire() as connection:
-        try:
-            row = await connection.fetchrow(query, invoice_id)
-            return dict(row) if row else None
-        except Exception as e:
-            print(f"Ошибка при чтении счёта {invoice_id}: {e}")
-            return None
+    async with pool.acquire() as con:
+        # Ищем запись, ID которой начинается с переданной строки deal_id
+        row = await con.fetchrow(
+            "SELECT * FROM invoices WHERE id::text LIKE $1 || '%'", 
+            deal_id
+        )
+        return row
 
 async def update_invoice_status(invoice_id: str, new_status: str) -> bool:
     """Обновление статуса счёта ('created' -> 'accepted' -> 'paid')"""

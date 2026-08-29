@@ -33,6 +33,33 @@ def transcribe_audio(wav_path: str) -> str:
             logger.error(f"Ошибка сервиса распознавания речи: {e}")
             return ""
 
+def clean_subject(raw_subject: str) -> str:
+    """
+    Очищает предмет сделки от глаголов, предлогов и мусорных слов.
+    Пример: 'Делаю дизайн лендинга' -> 'Дизайн лендинга'
+    Пример: 'по разработке сайта для компании' -> 'Сайт для компании'
+    """
+    if not raw_subject:
+        return "Услуга"
+    
+    text = raw_subject.strip()
+
+    # Регулярное выражение для удаления начальных глаголов и предлогов
+    noise_prefixes = (
+        r"^(делаю|сделать|нужно|надо|создать|разработать|написать|рисую|продам|купить|"
+        r"оформление|написание|создание|разработка|услуги|услуга|по|для|на|про|за|из|под)\s+"
+    )
+
+    # Повторяем удаление, если в начале несколько мусорных слов подряд
+    while re.search(noise_prefixes, text, flags=re.IGNORECASE):
+        text = re.sub(noise_prefixes, "", text, flags=re.IGNORECASE).strip()
+
+    # Очищаем края от символов и лишних пробелов
+    text = text.strip(" .,:-–—\"'")
+
+    # Возвращаем с заглавной буквы
+    return text.capitalize() if text else "Услуга"
+
 def parse_deal_details(text: str) -> dict:
     """
     Извлекает параметры сделки из текста:
@@ -106,7 +133,7 @@ def parse_deal_details(text: str) -> dict:
 
     return {
         "full_text": text,
-        "subject": subject,
+        "subject": clean_subject(subject),
         "amount": amount,
         "prepayment_percent": prepayment_percent,
         "prepayment_amount": prepayment_amount,

@@ -9,7 +9,7 @@ from aiogram.types import Message
 from config import settings
 from nlu_service import convert_ogg_to_wav, transcribe_audio, parse_deal_details
 from deal_storage import create_deal
-
+from aiogram.types import ErrorEvent
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -21,6 +21,17 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
 )
 dp = Dispatcher()
+
+@dp.error()
+async def global_error_handler(event: ErrorEvent):
+    print(f"[CRITICAL ERROR] Неперехваченная ошибка: {event.exception}")
+    
+    # Отправляем пользователю вежливое уведомление вместо молчания бота
+    if event.update.message:
+        await event.update.message.answer(
+            "⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте ещё раз."
+        )
+    return True
 
 @dp.message(Command("help"))
 async def cmd_help(message: Message):

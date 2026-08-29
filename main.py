@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from aiogram.types import Update
 import uvicorn
-
+import asyncio
 from config import settings
 from bot_instance import bot, dp
 from db import init_db, close_db, get_invoice
@@ -48,17 +48,17 @@ async def bot_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(None)
 ):
-    """Эндпоинт обработки входящих обновлений от Telegram"""
     if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
         return Response(status_code=401)
     
-    # Безопасный блок: любой сбой логики бота не ломает прием следующих сообщений
     try:
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
-        await dp.feed_update(bot, update)
+        
+        # Асинхронно запускаем обработку сообщения и СРАЗУ отвечаем Telegram 200 OK
+        asyncio.create_task(dp.feed_update(bot, update))
     except Exception as e:
-        print(f"[ERROR] Ошибка при обработке сообщения Telegram: {e}")
+        print(f"[ERROR] Ошибка разбора структуры сообщения: {e}")
         
     return JSONResponse(content={"status": "ok"})
 
