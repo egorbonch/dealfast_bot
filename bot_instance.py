@@ -104,7 +104,7 @@ async def handle_voice_message(message: types.Message):
         user_name = message.from_user.full_name or message.from_user.first_name
 
         # Сохранение сделки в БД/память
-        deal_id = create_deal(
+        deal_id = await create_deal(
             user_name=user_name,
             subject=subject,
             amount=amount,

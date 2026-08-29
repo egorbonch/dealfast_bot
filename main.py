@@ -76,7 +76,7 @@ async def bot_webhook(
 @app.get("/deal/{deal_id}", response_class=HTMLResponse)
 async def render_deal_page(request: Request, deal_id: str):
     """Вывод микро-лендинга сделки с загрузкой из Supabase"""
-    invoice = await get_invoice(deal_id)
+    invoice = await get_deal(deal_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Счёт не найден или был удалён")
     
