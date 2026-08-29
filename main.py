@@ -1,4 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
+import os
 import asyncio
 import logging
 import time
@@ -6,7 +7,7 @@ from typing import Any, Callable, Dict, Awaitable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from aiogram import BaseMiddleware
@@ -20,6 +21,19 @@ from db import init_db, close_db, get_invoice
 from sbp_service import get_bank_links, generate_qr_code_base64
 
 logger = logging.getLogger(__name__)
+
+
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+def get_clean_webhook_url() -> str:
+    """Формирует строго валидный HTTPS URL для Telegram Webhook"""
+    base = settings.BASE_URL.strip().rstrip('/')
+    if not base.startswith("https://"):
+        base = base.replace("http://", "https://")
+        if not base.startswith("https://"):
+            base = f"https://{base}"
+    
+    path = settings.WEBHOOK_PATH.strip().lstrip('/')
+    return f"{base}/{path}"
 
 
 # --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА (RATE LIMIT) ---
@@ -58,34 +72,32 @@ async def global_error_handler(event: ErrorEvent):
         logger.warning(f"⚠️ Ошибка 429: ожидание {event.exception.retry_after} секунд")
         await asyncio.sleep(event.exception.retry_after + 0.5)
         return True
-    logger.error(f"❌ Ошибка в работе бота: {event.exception}", exc_info=True)
+    logger.error(f"❌ Ошибка в обработчике aiogram: {event.exception}", exc_info=True)
 
 
-# --- 3. НАДЕЖНЫЙ ЖИЗНЕННЫЙ ЦИКЛ ПРИЛОЖЕНИЯ ---
+# --- 3. ЖИЗНЕННЫЙ ЦИКЛ ПРИЛОЖЕНИЯ ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Инициализация приложения и регистрация Webhook"""
     try:
         await init_db()
-        print("✅ База данных подключена")
+        logger.info("✅ База данных подключена")
     except Exception as e:
-        print(f"❌ Ошибка подключения к БД: {e}")
+        logger.error(f"❌ Ошибка подключения к БД: {e}")
 
-    webhook_url = f"{settings.BASE_URL.rstrip('/')}{settings.WEBHOOK_PATH}"
+    webhook_url = get_clean_webhook_url()
 
     try:
-        # 1. Очищаем старый вебхук и сбрасываем зависшие сообщения
         await bot.delete_webhook(drop_pending_updates=True)
         await asyncio.sleep(1)
         
-        # 2. Регистрируем прямой вебхук
         await bot.set_webhook(
             url=webhook_url,
-            drop_pending_updates=True
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]
         )
-        print(f"🚀 Webhook успешно зарегистрирован: {webhook_url}")
+        logger.info(f"🚀 Webhook успешно зарегистрирован: {webhook_url}")
     except Exception as e:
-        print(f"❌ Ошибка при установке Webhook: {e}")
+        logger.error(f"❌ Ошибка при установке Webhook: {e}")
 
     yield
 
@@ -95,11 +107,44 @@ async def lifespan(app: FastAPI):
         logger.error(f"Ошибка при удалении Webhook: {e}")
 
     await close_db()
-    print("🛑 Сервисы остановлены")
+    logger.info("🛑 Сервисы остановлены")
 
 
 app = FastAPI(title="DealFast WebApp & Bot", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
+
+
+# --- 4. ЭНДПОИНТЫ ДИАГНОСТИКИ ---
+@app.get("/debug/webhook")
+async def debug_webhook():
+    """Проверка текущего статуса вебхука прямо со серверов Telegram"""
+    try:
+        info = await bot.get_webhook_info()
+        return {
+            "status": "ok",
+            "url": info.url,
+            "has_custom_certificate": info.has_custom_certificate,
+            "pending_update_count": info.pending_update_count,
+            "last_error_date": info.last_error_date,
+            "last_error_message": info.last_error_message,
+            "max_connections": info.max_connections,
+            "allowed_updates": info.allowed_updates
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/debug/set-webhook")
+async def force_set_webhook():
+    """Ручной принудительный сброс и установка вебхука"""
+    webhook_url = get_clean_webhook_url()
+    await bot.delete_webhook(drop_pending_updates=True)
+    res = await bot.set_webhook(
+        url=webhook_url,
+        drop_pending_updates=True,
+        allowed_updates=["message", "callback_query"]
+    )
+    return {"status": "ok", "webhook_set": res, "url": webhook_url}
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -112,10 +157,12 @@ async def health_check():
     return {"status": "ok", "database": "connected"}
 
 
-# --- 4. ПРЯМОЙ ОБРАБОТЧИК WEBHOOK БЕЗ БЛОКИРОВОК ---
-@app.post(settings.WEBHOOK_PATH)
+# --- 5. ОБРАБОТЧИК WEBHOOK ---
+# Гарантируем, что путь маршрутизатора начинается со слэша
+route_path = f"/{settings.WEBHOOK_PATH.strip().lstrip('/')}"
+
+@app.post(route_path)
 async def bot_webhook(request: Request):
-    """Прием обновлений от Telegram без риска блокировок кодом 401"""
     try:
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
@@ -128,7 +175,6 @@ async def bot_webhook(request: Request):
 
 @app.get("/deal/{deal_id}", response_class=HTMLResponse)
 async def render_deal_page(request: Request, deal_id: str):
-    """Вывод микро-лендинга сделки с загрузкой из Supabase"""
     invoice = await get_invoice(deal_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Счёт не найден или был удалён")
@@ -169,4 +215,6 @@ async def render_deal_page(request: Request, deal_id: str):
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=False)
+    # Принудительно связываем с 0.0.0.0 и с портом, который выдал Render
+    port = int(os.getenv("PORT", getattr(settings, "PORT", 10000)))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
