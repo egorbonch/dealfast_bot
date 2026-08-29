@@ -13,6 +13,7 @@ async def init_db():
     if db_pool is None:
         db_pool = await asyncpg.create_pool(
             dsn=settings.DATABASE_URL,
+            statement_cache_size=0,  # Отключает кэшprepared statements для совместимости с PgBouncer
             min_size=1,
             max_size=10,
             timeout=30.0
