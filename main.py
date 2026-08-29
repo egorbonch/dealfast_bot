@@ -64,27 +64,24 @@ async def health_check():
     return {"status": "ok", "database": "connected"}
 
 
+# Обработчик webhook:
 @app.post(settings.WEBHOOK_PATH)
 async def bot_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(None)
 ):
-    logger.info("📩 Получен входящий запрос от Telegram")
-
-    # Проверяем секретный токен ТОЛЬКО если он задан в настройках и пришел от Telegram
-    if settings.WEBHOOK_SECRET and x_telegram_bot_api_secret_token:
+    # БЕЗОПАСНОСТЬ: Запрос обрабатывается ТОЛЬКО если секретный токен совпадает
+    if settings.WEBHOOK_SECRET:
         if x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
-            logger.warning("❌ Несовпадение WEBHOOK_SECRET: запрос отклонен (401)")
+            logger.warning("⛔ Заблокирована попытка несанкционированного доступа к Webhook")
             return Response(status_code=401)
 
     try:
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
-        
-        # Передаем обновление в диспетчер напрямую для перехвата всех ошибок
-        await dp.feed_update(bot, update)
+        asyncio.create_task(dp.feed_update(bot, update))
     except Exception as e:
-        logger.error(f"❌ Ошибка при обработке сообщения: {e}", exc_info=True)
+        logger.error(f"❌ Ошибка разбора обновления: {e}")
 
     return JSONResponse(content={"status": "ok"})
 

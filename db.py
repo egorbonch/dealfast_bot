@@ -1,4 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
+import re
 import asyncpg
 from typing import Optional, Dict, Any
 from config import settings
@@ -46,7 +47,15 @@ async def create_invoice(
 
 
 async def get_invoice(deal_id: str) -> Optional[Dict[str, Any]]:
-    """Получение счёта по полному или сокращённому UUID (первые 8 символов)"""
+    """Получение счёта с защитой от подмены wildcards (% и _)"""
+    if not deal_id:
+        return None
+
+    # БЕЗОПАСНОСТЬ: Оставляем только дефисы и hex-символы (буквы a-f, цифры 0-9)
+    clean_id = re.sub(r'[^a-fA-F0-9-]', '', deal_id)
+    if len(clean_id) < 8:
+        return None
+
     query = """
         SELECT *
         FROM invoices
@@ -54,17 +63,21 @@ async def get_invoice(deal_id: str) -> Optional[Dict[str, Any]]:
         LIMIT 1;
     """
     async with db_pool.acquire() as con:
-        row = await con.fetchrow(query, f"{deal_id}%")
+        row = await con.fetchrow(query, f"{clean_id}%")
         return dict(row) if row else None
 
 
 async def update_invoice_status(invoice_id: str, new_status: str) -> bool:
-    """Обновление статуса счёта по полному или сокращённому UUID"""
+    """Обновление статуса счёта"""
+    clean_id = re.sub(r'[^a-fA-F0-9-]', '', invoice_id)
+    if len(clean_id) < 8:
+        return False
+
     query = """
         UPDATE invoices
         SET status = $1
         WHERE id::text LIKE $2;
     """
     async with db_pool.acquire() as connection:
-        result = await connection.execute(query, new_status, f"{invoice_id}%")
+        result = await connection.execute(query, new_status, f"{clean_id}%")
         return "UPDATE" in result

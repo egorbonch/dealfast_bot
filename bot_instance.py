@@ -62,6 +62,9 @@ async def handle_text_message(message: Message):
 # --- 2. ОБРАБОТКА ГОЛОСОВЫХ СООБЩЕНИЙ И ПРОВЕРКА УСЛОВИЙ ---
 @dp.message(F.voice)
 async def handle_voice_message(message: types.Message):
+    if message.voice.file_size and message.voice.file_size > 10 * 1024 * 1024:
+        await message.answer("⚠️ Голосовое сообщение слишком длинное. Пожалуйста, запишите более короткое сообщение.")
+        return
     status_msg = await message.answer("🔄 Обрабатываю голосовое сообщение...")
 
     user_id = message.from_user.id
