@@ -1,14 +1,18 @@
-﻿from contextlib import asynccontextmanager
+﻿import asyncio
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from aiogram.types import Update
 import uvicorn
-import asyncio
+
 from config import settings
 from bot_instance import bot, dp
 from db import init_db, close_db, get_invoice
 from sbp_service import generate_sbp_link, generate_qr_code_base64
+
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,8 +20,9 @@ async def lifespan(app: FastAPI):
     # 1. Инициализация пула БД
     await init_db()
     
-    # 2. Установка Webhook для Telegram (drop_pending_updates очищает старую очередь)
+    # 2. Принудительный сброс зависших сообщений и установка Webhook
     webhook_url = f"{settings.BASE_URL}{settings.WEBHOOK_PATH}"
+    await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(
         url=webhook_url,
         secret_token=settings.WEBHOOK_SECRET,
@@ -58,7 +63,7 @@ async def bot_webhook(
         # Асинхронно запускаем обработку сообщения и СРАЗУ отвечаем Telegram 200 OK
         asyncio.create_task(dp.feed_update(bot, update))
     except Exception as e:
-        print(f"[ERROR] Ошибка разбора структуры сообщения: {e}")
+        logger.error(f"Ошибка разбора структуры сообщения: {e}")
         
     return JSONResponse(content={"status": "ok"})
 
