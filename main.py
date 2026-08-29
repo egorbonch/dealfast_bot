@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="DealFast WebApp & Bot", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"status": "ok", "message": "DealFast Bot is running"}
 
