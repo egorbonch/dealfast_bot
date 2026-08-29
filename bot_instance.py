@@ -5,7 +5,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-
+from aiogram.types import Message
 from config import settings
 from nlu_service import convert_ogg_to_wav, transcribe_audio, parse_deal_details
 from deal_storage import create_deal
@@ -22,6 +22,15 @@ bot = Bot(
 )
 dp = Dispatcher()
 
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    await message.answer(
+        "ℹ️ *Как пользоваться ботом DealFast:*\n\n"
+        "1. Отправьте голосовое или текстовое сообщение с условиями сделки (например: *'Сайт за 15000 рублей, предоплата 10%'*).\n"
+        "2. Бот автоматически распознает условия и сгенерирует счёт.\n"
+        "3. Отправьте полученную ссылку покупателю для оплаты через СБП.",
+        parse_mode="Markdown"
+    )
 @dp.message(CommandStart())
 async def handle_start(message: types.Message):
     welcome_text = (
