@@ -22,6 +22,9 @@ from sbp_service import get_bank_links, generate_qr_code_base64
 
 logger = logging.getLogger(__name__)
 
+# Время последнего принудительного сброса вебхука (для кулдауна)
+LAST_RESET_TIME = 0.0
+
 
 def get_clean_base_url(request_host: str = None) -> str:
     """Определяет базовый URL из настроек, переменных Render или хоста запроса"""
@@ -44,30 +47,41 @@ def get_webhook_url(request_host: str = None) -> str:
     return f"{base}/{path}" if base else ""
 
 
-# --- АВТОМАТИЧЕСКИЙ СБРОС И ВОССТАНОВЛЕНИЕ ВЕБХУКА ---
-async def auto_reset_webhook_if_stuck():
-    """Сбрасывает ошибки Telegram и восстанавливает соединение при зависании"""
+# --- БЕЗОПАСНАЯ ФУНКЦИЯ СБРОСА И ПЕРЕПРИВЯЗКИ ВЕБХУКА ---
+async def safe_repair_webhook(drop_pending: bool = True) -> bool:
+    """Выполняет перепривязку вебхука с защитой от слишком частого вызова"""
+    global LAST_RESET_TIME
+    now = time.time()
+    
+    # Защитный кулдаун: не чаще 1 раза в 60 секунд
+    if now - LAST_RESET_TIME < 60:
+        logger.info("⏳ Пропуск сброса Webhook: кулдаун еще не истек.")
+        return False
+
+    LAST_RESET_TIME = now
     target_url = get_webhook_url()
     if not target_url:
+        logger.error("❌ Не удалось получить webhook URL для перепривязки")
         return False
+
     try:
-        await bot.delete_webhook(drop_pending_updates=False)
-        await asyncio.sleep(0.2)
+        await bot.delete_webhook(drop_pending_updates=drop_pending)
+        await asyncio.sleep(0.5)
         res = await bot.set_webhook(
             url=target_url,
-            drop_pending_updates=False,
+            drop_pending_updates=drop_pending,
             allowed_updates=["message", "callback_query"]
         )
-        logger.info(f"🔄 Webhook автоматически перезапущен и очищен от ошибок: {target_url}")
+        logger.info(f"🔄 Webhook успешно перепривязан! Result: {res}, URL: {target_url}")
         return res
     except Exception as e:
-        logger.error(f"❌ Ошибка при авто-перезапуске Webhook: {e}")
+        logger.error(f"❌ Ошибка перепривязки Webhook: {e}")
         return False
 
 
-# --- ФОНОВАЯ СЛУЖБА КОНТРОЛЯ СОСТОЯНИЯ (WATCHDOG) ---
-async def webhook_watchdog():
-    """Раз в 30 секунд проверяет наличие ошибок доставки в Telegram и мгновенно сбрасывает их"""
+# --- УМНЫЙ ФОНОВЫЙ МОНИТОР (SMART WATCHDOG) ---
+async def smart_webhook_watchdog():
+    """Раз в 30 секунд проверяет статус Telegram и авто-восстанавливает вебхук ТОЛЬКО при проблемах"""
     while True:
         try:
             await asyncio.sleep(30)
@@ -77,17 +91,26 @@ async def webhook_watchdog():
 
             info = await bot.get_webhook_info()
             
-            # Если Telegram зафиксировал ошибку доставки ИЛИ адрес отвязался
-            if info.last_error_message or info.url != target_url:
+            # Условия, указывающие на то, что Telegram застрял или заблокировал доставку:
+            # 1. Telegram сам сообщает об ошибке доставки (info.last_error_message)
+            # 2. Накопилось более 3 зависших сообщений (info.pending_update_count > 3)
+            # 3. URL слетел или не совпадает с текущим
+            has_error = bool(info.last_error_message)
+            stuck_queue = info.pending_update_count > 3
+            url_mismatch = info.url != target_url
+
+            if has_error or stuck_queue or url_mismatch:
                 logger.warning(
-                    f"⚠️ Обнаружена блокировка Telegram! Ошибка: '{info.last_error_message}', "
-                    f"Текущий URL: '{info.url}'. Автоматическое исправление..."
+                    f"⚠️ Обнаружен сбой соединения! (Ошибка: '{info.last_error_message}', "
+                    f"Застряло сообщений: {info.pending_update_count}, URL: '{info.url}'). "
+                    f"Запуск авто-восстановления..."
                 )
-                await auto_reset_webhook_if_stuck()
+                await safe_repair_webhook(drop_pending=True)
+
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error(f"❌ Ошибка монитора Webhook: {e}")
+            logger.error(f"❌ Ошибка в работе фонового монитора: {e}")
 
 
 # --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА (RATE LIMIT) ---
@@ -138,10 +161,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Ошибка подключения к БД: {e}")
 
-    await auto_reset_webhook_if_stuck()
+    # Первоначальный авто-сброс и установка при запуске сервера
+    await safe_repair_webhook(drop_pending=True)
 
-    # Запуск фонового авто-исправителя
-    watchdog_task = asyncio.create_task(webhook_watchdog())
+    # Запуск умного монитора
+    watchdog_task = asyncio.create_task(smart_webhook_watchdog())
 
     yield
 
@@ -171,16 +195,11 @@ async def debug_webhook():
         return {"status": "error", "message": str(e)}
 
 
-@app.get("/debug/set-webhook")
-async def force_set_webhook(request: Request):
-    host = request.headers.get("host")
-    webhook_url = get_webhook_url(request_host=host)
-    
-    if not webhook_url:
-        return {"status": "error", "message": "Не удалось определить URL для вебхука"}
-        
-    res = await auto_reset_webhook_if_stuck()
-    return {"status": "ok", "webhook_set": res, "url": webhook_url}
+@app.get("/debug/reset-webhook")
+async def force_reset_webhook(request: Request):
+    """Ручной эндпоинт восстановления на случай проверки"""
+    res = await safe_repair_webhook(drop_pending=True)
+    return {"status": "ok", "webhook_reset": res}
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -193,7 +212,14 @@ async def health_check():
     return {"status": "ok", "database": "connected"}
 
 
-# --- 5. ОБРАБОТЧИК WEBHOOK (МГНОВЕННАЯ ОТДАЧА TELEGRAM) ---
+# --- 5. ОБРАБОТЧИК WEBHOOK (МГНОВЕННЫЙ ОТВЕТ TELEGRAM) ---
+async def process_update_safely(update: Update):
+    try:
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки обновления бота: {e}", exc_info=True)
+
+
 @app.post("/webhook")
 @app.post(f"/{getattr(settings, 'WEBHOOK_PATH', 'webhook').strip().lstrip('/')}")
 async def bot_webhook(request: Request):
@@ -201,9 +227,8 @@ async def bot_webhook(request: Request):
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
         
-        # Асинхронный фоновый запуск: отдает 200 OK Telegram немедленно,
-        # исключая возникновение таймаутов и заторов
-        asyncio.create_task(dp.feed_update(bot, update))
+        # Передаем работу в фоновый таск, а Telegram отдаем 200 OK за 1 мс
+        asyncio.create_task(process_update_safely(update))
     except Exception as e:
         logger.error(f"❌ Ошибка приема вебхука Telegram: {e}", exc_info=True)
 
