@@ -2,20 +2,9 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Счёт-Соглашение № {{ deal.id }}</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Оплата сделки №{{ deal.id }}</title>
     <style>
-        :root {
-            --bg-color: #f4f6f9;
-            --card-bg: #ffffff;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --primary-blue: #2563eb;
-            --sbp-green: #10b981;
-            --border-color: #e2e8f0;
-        }
-
         * {
             box-sizing: border-box;
             margin: 0;
@@ -24,397 +13,268 @@
         }
 
         body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
+            background-color: #f4f6f9;
+            color: #1a1a1a;
             display: flex;
             justify-content: center;
-            padding: 16px;
-            min-height: 100vh;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 440px;
-            margin: 0 auto;
+            padding: 20px 12px;
         }
 
         .card {
-            background: var(--card-bg);
+            background: #ffffff;
+            width: 100%;
+            max-width: 480px;
             border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
             padding: 24px;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
-            border: 1px solid var(--border-color);
         }
 
-        .executor-header {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid var(--border-color);
+        .header {
+            text-align: center;
             margin-bottom: 20px;
         }
 
-        .avatar {
-            width: 52px;
-            height: 52px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            font-weight: 700;
-            flex-shrink: 0;
-        }
-
-        .executor-info h3 {
-            font-size: 17px;
-            font-weight: 600;
-        }
-
-        .executor-info p {
-            font-size: 13px;
-            color: var(--text-muted);
-            margin-top: 2px;
-        }
-
-        .deal-badge {
-            display: inline-block;
-            background: #eff6ff;
-            color: var(--primary-blue);
-            padding: 4px 10px;
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 16px;
-        }
-
-        .param-group {
-            margin-bottom: 16px;
-        }
-
-        .param-label {
-            font-size: 12px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .param-value {
-            font-size: 15px;
-            font-weight: 500;
-        }
-
-        .price-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            background: #f8fafc;
-            padding: 14px;
-            border-radius: 12px;
-            margin: 16px 0;
-            border: 1px dashed #cbd5e1;
-        }
-
-        .price-item .amount {
-            font-size: 18px;
-            font-weight: 700;
-        }
-
-            .price-item .amount.highlight {
-                color: var(--sbp-green);
+            .header h1 {
+                font-size: 20px;
+                color: #111;
+                margin-bottom: 6px;
             }
+
+            .header p {
+                font-size: 14px;
+                color: #666;
+            }
+
+        .amount-box {
+            background: #f8f9fa;
+            border-radius: 14px;
+            padding: 16px;
+            text-align: center;
+            margin-bottom: 20px;
+            border: 1px solid #e9ecef;
+        }
+
+        .amount-title {
+            font-size: 13px;
+            color: #707579;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .amount-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #000;
+            margin-top: 4px;
+        }
 
         .qr-section {
             text-align: center;
-            background: #f8fafc;
-            border-radius: 16px;
+            margin-bottom: 24px;
             padding: 16px;
-            margin: 20px 0;
-            border: 1px solid var(--border-color);
+            background: #fff;
+            border: 1px solid #eee;
+            border-radius: 16px;
         }
 
             .qr-section img {
                 width: 180px;
                 height: 180px;
-                border-radius: 12px;
-                border: 4px solid #ffffff;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+                border-radius: 8px;
             }
 
-        .legal-box {
-            background: #fffbeb;
-            border: 1px solid #fef3c7;
-            border-radius: 12px;
-            padding: 12px 14px;
-            margin-bottom: 20px;
+        .qr-hint {
+            font-size: 12px;
+            color: #777;
+            margin-top: 10px;
+            line-height: 1.4;
         }
 
-            .legal-box p {
-                font-size: 11px;
-                color: #b45309;
-                line-height: 1.4;
-            }
-
-        .checkbox-container {
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-            margin-bottom: 20px;
-            cursor: pointer;
-        }
-
-            .checkbox-container input {
-                width: 18px;
-                height: 18px;
-                margin-top: 2px;
-                accent-color: var(--sbp-green);
-            }
-
-            .checkbox-container span {
-                font-size: 13px;
-                line-height: 1.3;
-            }
-
-        /* Одна главная кнопка */
-        .btn-main-pay {
-            width: 100%;
-            background-color: var(--sbp-green);
-            color: #ffffff;
-            border: none;
-            padding: 16px;
+        .phone-box {
+            background: #eef5ff;
+            border: 1px dashed #007bff;
             border-radius: 14px;
-            font-size: 16px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
-        }
-
-            .btn-main-pay:disabled {
-                background-color: #cbd5e1;
-                color: #94a3b8;
-                cursor: not-allowed;
-                box-shadow: none;
-            }
-
-        /* МОДАЛЬНОЕ ОКНО */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(4px);
-            display: none;
-            justify-content: center;
-            align-items: flex-end;
-            z-index: 1000;
-        }
-
-        .modal-card {
-            background: #ffffff;
-            width: 100%;
-            max-width: 440px;
-            border-radius: 24px 24px 0 0;
-            padding: 24px;
-            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        @keyframes slideUp {
-            from {
-                transform: translateY(100%);
-            }
-
-            to {
-                transform: translateY(0);
-            }
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            padding: 14px;
             margin-bottom: 20px;
+            text-align: center;
         }
 
-        .modal-title {
-            font-size: 18px;
-            font-weight: 700;
-        }
-
-        .modal-close {
-            background: #f1f5f9;
-            border: none;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            font-size: 18px;
-            cursor: pointer;
-        }
-
-        .bank-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .bank-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 14px 16px;
-            border-radius: 14px;
-            text-decoration: none;
+        .phone-label {
+            font-size: 12px;
+            color: #0056b3;
             font-weight: 600;
-            font-size: 15px;
-            cursor: pointer;
-            border: 1px solid var(--border-color);
-            transition: background 0.2s;
+            margin-bottom: 4px;
         }
 
-            .bank-item.tbank {
-                background: #fffbe6;
-                border-color: #ffe58f;
-                color: #1f1f1f;
+        .phone-number {
+            font-size: 18px;
+            font-weight: 700;
+            color: #004085;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-copy {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-top: 8px;
+            cursor: pointer;
+            width: 100%;
+        }
+
+            .btn-copy:active {
+                opacity: 0.8;
             }
 
-            .bank-item.sber {
-                background: #e6f7ff;
-                border-color: #91d5ff;
-                color: #0050b3;
+        .banks-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #444;
+            margin-bottom: 12px;
+        }
+
+        .bank-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: transform 0.1s;
+        }
+
+            .bank-btn:active {
+                transform: scale(0.98);
             }
 
-            .bank-item.alfa {
-                background: #fff1f0;
-                border-color: #ffa39e;
-                color: #cf1322;
-            }
+        /* Стили кнопок банков без встроенного Jinja2 */
+        .bank-sber {
+            background-color: #21a038;
+            color: #ffffff;
+        }
+
+        .bank-tbank {
+            background-color: #ffdd2d;
+            color: #000000;
+        }
+
+        .bank-alfa {
+            background-color: #ef3124;
+            color: #ffffff;
+        }
+
+        .bank-vtb {
+            background-color: #002882;
+            color: #ffffff;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.85);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 13px;
+            display: none;
+            z-index: 100;
+            text-align: center;
+            width: 90%;
+            max-width: 360px;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <!-- Шапка -->
-            <div class="executor-header">
-                <div class="avatar">
-                    {{ deal.user_name[0] if deal.user_name else 'Ф' }}
-                </div>
-                <div class="executor-info">
-                    <h3>{{ deal.user_name }}</h3>
-                    <p>Исполнитель • Фрилансер</p>
-                </div>
-            </div>
 
-            <div class="deal-badge">Счёт-Соглашение № {{ deal.id }}</div>
-
-            <div class="param-group">
-                <div class="param-label">Предмет работ</div>
-                <div class="param-value">{{ deal.subject }}</div>
-            </div>
-
-            <div class="price-grid">
-                <div class="price-item">
-                    <div class="param-label">Общая стоимость</div>
-                    <div class="amount">{{ deal.amount }} ₽</div>
-                </div>
-                <div class="price-item">
-                    <div class="param-label">К оплате сейчас</div>
-                    <div class="amount highlight">{{ pay_amount }} ₽</div>
-                </div>
-            </div>
-
-            <div class="param-group">
-                <div class="param-label">Срок выполнения</div>
-                <div class="param-value">⏱ {{ deal.term }}</div>
-            </div>
-
-            <!-- QR-код ведет на страницу счёта -->
-            <div class="qr-section">
-                <img src="data:image/png;base64,{{ qr_code_base64 }}" alt="QR-код оплаты">
-                <div class="qr-hint" style="font-size: 12px; color: #64748b; margin-top: 8px;">
-                    Отсканируйте камерой телефона для оплаты
-                </div>
-            </div>
-
-            <!-- Оферта -->
-            <div class="legal-box">
-                <p><strong>Безопасная сделка:</strong> Оплата подтверждает согласие с условиями счёта и является акцептом публичной оферты (ст. 438 ГК РФ).</p>
-            </div>
-
-            <label class="checkbox-container">
-                <input type="checkbox" id="offerAgreement" onchange="togglePayButton()">
-                <span>Я принимаю условия публичной оферты</span>
-            </label>
-
-            <!-- ОДНА КНОПКА -->
-            <button type="button" id="payButton" class="btn-main-pay" onclick="openBankModal()" disabled>
-                Оплатить {{ pay_amount }} ₽
-            </button>
+    <div class="card">
+        <div class="header">
+            <h1>Сделка №{{ deal.id }}</h1>
+            <p>{{ deal.subject }}</p>
         </div>
-    </div>
 
-    <!-- ВСПЛЫВАЮЩЕЕ ОКНО ВЫБОРА БАНКА -->
-    <div id="bankModal" class="modal-overlay" onclick="closeBankModal(event)">
-        <div class="modal-card" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <div class="modal-title">Выберите банк для оплаты</div>
-                <button class="modal-close" onclick="closeBankModal()">✕</button>
-            </div>
-            <div class="bank-list">
-                <!-- Т-Банк -->
-                <div class="bank-item tbank" onclick="payWithBank('{{ bank_links.tbank }}')">
-                    💛 Т-Банк (Т-Pay / СБП)
-                </div>
+        <div class="amount-box">
+            <div class="amount-title">К оплате (СБП)</div>
+            <div class="amount-value">{{ "%.2f"|format(pay_amount) }} ₽</div>
+        </div>
 
-                <!-- Сбербанк -->
-                <div class="bank-item sber" onclick="payWithBank('{{ bank_links.sber }}')">
-                    💚 Сбербанк (СберБанк Онлайн)
-                </div>
+        <div class="phone-box">
+            <div class="phone-label">Номер для перевода по СБП</div>
+            <div class="phone-number" id="phoneNumber">{{ phone_display }}</div>
+            <button class="btn-copy" onclick="copyPhone()">📋 Скопировать номер</button>
+        </div>
 
-                <!-- Альфа-Банк -->
-                <div class="bank-item alfa" onclick="payWithBank('{{ bank_links.alfa }}')">
-                    ❤️ Альфа-Банк
-                </div>
+        <div class="qr-section">
+            <img src="data:image/png;base64,{{ qr_code_base64 }}" alt="QR Code">
+            <div class="qr-hint">
+                📷 <strong>Сканируйте обычной камерой телефона</strong>,<br>чтобы открыть эту страницу оплаты на смартфоне.
             </div>
         </div>
+
+        <div class="banks-title">Оплатить в приложении банка:</div>
+
+        <button class="bank-btn bank-sber" onclick="openBank('{{ bank_links.sber.deeplink }}', '{{ bank_links.sber.web_fallback }}')">
+            🟢 СберБанк
+        </button>
+
+        <button class="bank-btn bank-tbank" onclick="openBank('{{ bank_links.tbank.deeplink }}', '{{ bank_links.tbank.web_fallback }}')">
+            🟡 Т-Банк (Тинькофф)
+        </button>
+
+        <button class="bank-btn bank-alfa" onclick="openBank('{{ bank_links.alfa.deeplink }}', '{{ bank_links.alfa.web_fallback }}')">
+            🔴 Альфа-Банк
+        </button>
+
+        <button class="bank-btn bank-vtb" onclick="openBank('{{ bank_links.vtb.deeplink }}', '{{ bank_links.vtb.web_fallback }}')">
+            🔵 ВТБ
+        </button>
     </div>
+
+    <div id="toast" class="toast"></div>
 
     <script>
-        if (window.Telegram && window.Telegram.WebApp) {
-            window.Telegram.WebApp.ready();
-            window.Telegram.WebApp.expand();
-        }
+    const cleanPhone = "{{ clean_phone }}";
 
-        function togglePayButton() {
-            const checkbox = document.getElementById('offerAgreement');
-            const button = document.getElementById('payButton');
-            button.disabled = !checkbox.checked;
-        }
+    function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.innerText = message;
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 3500);
+    }
 
-        function openBankModal() {
-            document.getElementById('bankModal').style.display = 'flex';
-        }
+    function copyPhone() {
+        navigator.clipboard.writeText(cleanPhone).then(() => {
+            showToast('✅ Номер ' + cleanPhone + ' скопирован! Вставьте его при переводе по СБП.');
+        }).catch(() => {
+            showToast('Номер: ' + cleanPhone);
+        });
+    }
 
-        function closeBankModal(event) {
-            document.getElementById('bankModal').style.display = 'none';
-        }
+    function openBank(deeplink, fallback) {
+        copyPhone();
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-        function payWithBank(url) {
-            closeBankModal();
-
-            // Если переход внутри Telegram
-            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
-                window.Telegram.WebApp.openLink(url);
-            } else {
-                // Прямой вызов Deep-Link для мобильного приложения банка
-                window.location.href = url;
-            }
+        if (isMobile) {
+            window.location.href = deeplink;
+            setTimeout(() => {
+                window.location.href = fallback;
+            }, 1500);
+        } else {
+            showToast('📱 Номер скопирован! Откройте приложение банка на телефоне и переведите по СБП.');
         }
+    }
     </script>
+
 </body>
 </html>

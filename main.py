@@ -18,7 +18,12 @@ import uvicorn
 from config import settings
 from bot_instance import bot, dp
 from db import init_db, close_db, get_invoice
-from sbp_service import get_bank_links, generate_qr_code_base64
+from sbp_service import (
+    get_bank_links,
+    generate_qr_code_base64,
+    clean_phone_number,
+    format_phone_display
+)
 
 logger = logging.getLogger(__name__)
 
@@ -266,8 +271,12 @@ async def render_deal_page(request: Request, deal_id: str):
     pay_amount = prepayment if prepayment > 0 else total_amount
     comment = f"Оплата по сделке №{str(invoice['id'])[:8]}"
 
+    raw_phone = settings.RECEIVER_PHONE
+    clean_phone = clean_phone_number(raw_phone)
+    phone_display = format_phone_display(raw_phone)
+
     bank_links = get_bank_links(
-        phone=settings.RECEIVER_PHONE,
+        phone=clean_phone,
         amount=pay_amount,
         comment=comment
     )
@@ -289,6 +298,8 @@ async def render_deal_page(request: Request, deal_id: str):
                 "term": invoice.get("term", "По договоренности")
             },
             "pay_amount": pay_amount,
+            "clean_phone": clean_phone,
+            "phone_display": phone_display,
             "bank_links": bank_links,
             "qr_code_base64": qr_code_base64
         }
