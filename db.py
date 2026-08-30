@@ -13,7 +13,7 @@ async def init_db():
     if db_pool is None:
         db_pool = await asyncpg.create_pool(
             dsn=settings.DATABASE_URL,
-            statement_cache_size=0,  # Отключает кэшprepared statements для совместимости с PgBouncer
+            statement_cache_size=0,  # Отключает кэш prepared statements для совместимости с PgBouncer
             min_size=1,
             max_size=10,
             timeout=30.0
@@ -31,10 +31,11 @@ async def close_db():
 
 
 async def create_invoice(
-    creator_id: int, 
+    creator_id: Any, 
     title: str, 
     amount: float, 
-    prepayment: float = 0.0
+    prepayment: float = 0.0,
+    term: Optional[str] = None
 ) -> Dict[str, Any]:
     """Создание нового счёта в БД"""
     query = """
@@ -43,8 +44,13 @@ async def create_invoice(
         RETURNING id, creator_id, title, amount, prepayment, status, created_at;
     """
     async with db_pool.acquire() as connection:
-        row = await connection.fetchrow(query, creator_id, title, amount, prepayment)
-        return dict(row)
+        # Приводим creator_id к строке или числу в зависимости от передаваемого типа
+        c_id = str(creator_id) if creator_id is not None else "0"
+        row = await connection.fetchrow(query, c_id, title, amount, prepayment)
+        res = dict(row)
+        if term:
+            res["term"] = term
+        return res
 
 
 async def get_invoice(deal_id: str) -> Optional[Dict[str, Any]]:
@@ -52,7 +58,6 @@ async def get_invoice(deal_id: str) -> Optional[Dict[str, Any]]:
     if not deal_id:
         return None
 
-    # БЕЗОПАСНОСТЬ: Оставляем только дефисы и hex-символы (буквы a-f, цифры 0-9)
     clean_id = re.sub(r'[^a-fA-F0-9-]', '', deal_id)
     if len(clean_id) < 8:
         return None
