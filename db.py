@@ -13,7 +13,7 @@ async def init_db():
     if db_pool is None:
         db_pool = await asyncpg.create_pool(
             dsn=settings.DATABASE_URL,
-            statement_cache_size=0,  # Отключает кэш prepared statements для совместимости с PgBouncer
+            statement_cache_size=0,  # Отключает кэш prepared statements для PgBouncer
             min_size=1,
             max_size=10,
             timeout=30.0
@@ -34,27 +34,27 @@ async def create_invoice(
     creator_id: Any, 
     title: str, 
     amount: float, 
-    prepayment: float = 0.0,
-    term: Optional[str] = None
+    prepayment: float = 0.0
 ) -> Dict[str, Any]:
-    """Создание нового счёта в БД"""
+    """Создание нового счёта в БД с защитой от переполнения ID"""
     query = """
         INSERT INTO invoices (creator_id, title, amount, prepayment, status)
         VALUES ($1, $2, $3, $4, 'created')
         RETURNING id, creator_id, title, amount, prepayment, status, created_at;
     """
     async with db_pool.acquire() as connection:
-        # Приводим creator_id к строке или числу в зависимости от передаваемого типа
-        c_id = str(creator_id) if creator_id is not None else "0"
+        # Приводим к int (для BIGINT в SQL) или str в зависимости от схемы таблицы
+        try:
+            c_id = int(creator_id)
+        except (ValueError, TypeError):
+            c_id = str(creator_id)
+
         row = await connection.fetchrow(query, c_id, title, amount, prepayment)
-        res = dict(row)
-        if term:
-            res["term"] = term
-        return res
+        return dict(row)
 
 
 async def get_invoice(deal_id: str) -> Optional[Dict[str, Any]]:
-    """Получение счёта с защитой от подмены wildcards (% и _)"""
+    """Получение счёта с защитой от подмены wildcards"""
     if not deal_id:
         return None
 
