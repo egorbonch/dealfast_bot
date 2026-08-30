@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 def get_clean_base_url(request_host: str = None) -> str:
     """Определяет базовый URL из настроек, переменных Render или хоста запроса"""
     base = getattr(settings, "BASE_URL", "") or os.getenv("RENDER_EXTERNAL_URL", "")
-    
     if not base and request_host:
         base = f"https://{request_host}"
 
@@ -41,8 +40,44 @@ def get_clean_base_url(request_host: str = None) -> str:
 
 def get_webhook_url(request_host: str = None) -> str:
     base = get_clean_base_url(request_host)
-    path = getattr(settings, "WEBHOOK_PATH", "/webhook").strip().lstrip('/')
+    path = getattr(settings, "WEBHOOK_PATH", "webhook").strip().lstrip('/')
     return f"{base}/{path}" if base else ""
+
+
+# --- ФОНОВАЯ СЛУЖБА: АВТО-ДИАГНОСТИКА И СБРОС ЗАТОРОВ ---
+async def webhook_watchdog():
+    """Раз в 60 секунд проверяет статус вебхука и автоматически сбрасывает застрявшую очередь"""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            target_url = get_webhook_url()
+            if not target_url:
+                continue
+
+            info = await bot.get_webhook_info()
+            
+            # Если URL сбился ИЛИ в Telegram застряли неотвеченные сообщения
+            need_reset = (info.url != target_url) or (info.pending_update_count > 2)
+            
+            if need_reset:
+                logger.warning(
+                    f"⚠️ Обнаружена проблема с Webhook! (URL: '{info.url}', "
+                    f"зависших сообщений: {info.pending_update_count}). Авто-восстановление..."
+                )
+                # 1. Принудительно очищаем застрявшую очередь сообщений в Telegram
+                await bot.delete_webhook(drop_pending_updates=True)
+                await asyncio.sleep(0.5)
+                # 2. Перепривязываем чистый вебхук
+                await bot.set_webhook(
+                    url=target_url,
+                    drop_pending_updates=True,
+                    allowed_updates=["message", "callback_query"]
+                )
+                logger.info("✅ Webhook и очередь сообщений успешно очищены и восстановлены!")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"❌ Ошибка службы авто-восстановления Webhook: {e}")
 
 
 # --- 1. MIDDLEWARE ДЛЯ ЗАЩИТЫ ОТ СПАМА (RATE LIMIT) ---
@@ -94,12 +129,11 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Ошибка подключения к БД: {e}")
 
     webhook_url = get_webhook_url()
-
     if webhook_url:
         try:
+            # При запуске всегда сбрасываем зависшую очередь
             await bot.delete_webhook(drop_pending_updates=True)
-            await asyncio.sleep(1)
-            
+            await asyncio.sleep(0.5)
             res = await bot.set_webhook(
                 url=webhook_url,
                 drop_pending_updates=True,
@@ -108,16 +142,13 @@ async def lifespan(app: FastAPI):
             logger.info(f"🚀 Webhook зарегистрирован ({res}): {webhook_url}")
         except Exception as e:
             logger.error(f"❌ Ошибка при установке Webhook: {e}")
-    else:
-        logger.error("❌ BASE_URL не найден! Webhook не запущен.")
+
+    # Запускаем фоновую службу контроля вебхука
+    watchdog_task = asyncio.create_task(webhook_watchdog())
 
     yield
 
-    try:
-        await bot.delete_webhook()
-    except Exception as e:
-        logger.error(f"Ошибка при удалении Webhook: {e}")
-
+    watchdog_task.cancel()
     await close_db()
     logger.info("🛑 Сервисы остановлены")
 
@@ -144,7 +175,6 @@ async def debug_webhook():
 
 @app.get("/debug/set-webhook")
 async def force_set_webhook(request: Request):
-    """Принудительно устанавливает вебхук, используя хост из запроса"""
     host = request.headers.get("host")
     webhook_url = get_webhook_url(request_host=host)
     
@@ -152,6 +182,7 @@ async def force_set_webhook(request: Request):
         return {"status": "error", "message": "Не удалось определить URL для вебхука"}
         
     await bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(0.5)
     res = await bot.set_webhook(
         url=webhook_url,
         drop_pending_updates=True,
@@ -170,16 +201,19 @@ async def health_check():
     return {"status": "ok", "database": "connected"}
 
 
-# --- 5. ОБРАБОТЧИК WEBHOOK ---
+# --- 5. ОБРАБОТЧИК WEBHOOK (МГНОВЕННЫЙ ОТВЕТ TELEGRAM) ---
 @app.post("/webhook")
 @app.post(f"/{getattr(settings, 'WEBHOOK_PATH', 'webhook').strip().lstrip('/')}")
 async def bot_webhook(request: Request):
     try:
         data = await request.json()
         update = Update.model_validate(data, context={"bot": bot})
-        await dp.feed_update(bot, update)
+        
+        # ВАЖНО: Передаем обработку в фоновую задачу, чтобы МГНОВЕННО вернуть Telegram статус 200 OK.
+        # Это предотвращает таймауты Telegram и заторы в очереди.
+        asyncio.create_task(dp.feed_update(bot, update))
     except Exception as e:
-        logger.error(f"❌ Ошибка обработки вебхука Telegram: {e}", exc_info=True)
+        logger.error(f"❌ Ошибка приема вебхука Telegram: {e}", exc_info=True)
 
     return JSONResponse(content={"status": "ok"})
 
